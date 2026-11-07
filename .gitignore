@@ -1,51 +1,23 @@
-.vs/
-**/.vs/
-.idea/
-
-bin/
-obj/
-**/bin/
-**/obj/
-
+# Python and build output
+__pycache__/
+*.py[cod]
+.venv/
 dist/
-publish/
-**/publish/
+*.egg-info/
+*.rpm
 
-TestResults/
-**/TestResults/
-*.trx
-
-*.user
-*.suo
-*.userosscache
-*.sln.docstates
-
-debug.log
+# Local editor, logs and agent coordination
+.idea/
+.vscode/
+.cursor/
 *.log
 *.tmp
 *.cache
-
-scratch/
-acpi_staging/*
-!acpi_staging/preysense.mof
-!acpi_staging/SSDT-PREYDEV.aml
-!acpi_staging/SSDT-PREYDEV.dsl
-acer-predator-re/
-
-# Local editor and UI-test state
-.cursor/
-CURSOR.md
-test_tools/captures/
-
-# Machine-specific firmware dumps and external research checkouts
-docs/acpi_tables/
-docs/bios/
-tools/rea/
-tools/rw/
-tools/Configuration.pdf
-tools/OpenCore_PreyBoost_EFI/OpenCore-*-RELEASE.zip
-
-# Local agent coordination and editing backups
+*.py.new
 /AGENT_HANDOFF.md
 /linux/REMAINING.md
-*.py.new
+
+# Local research retained outside the Linux release
+/tools/
+/docs/acpi_tables/
+/docs/bios/

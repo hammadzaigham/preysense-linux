@@ -1,6 +1,0 @@
-<Solution>
-  <Project Path="PreySense.Core/PreySense.Core.csproj" />
-  <Project Path="PreySense.Overlay/PreySense.Overlay.csproj" />
-  <Project Path="PreySense.Frontend/PreySense.Frontend.csproj" />
-  <Project Path="PreySense.Tests/PreySense.Tests.csproj" />
-</Solution>

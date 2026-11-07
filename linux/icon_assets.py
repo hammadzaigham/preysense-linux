@@ -10,7 +10,7 @@ from PySide6.QtCore import QSize, QRectF, Qt
 from PySide6.QtGui import QColor, QGuiApplication, QIcon, QPainter, QPixmap
 from PySide6.QtSvg import QSvgRenderer
 
-FRONTEND_ROOT=Path(__file__).resolve().parent.parent/'PreySense.Frontend'
+FRONTEND_ROOT=Path(__file__).resolve().parent/'assets'
 RESOURCE_ROOT=FRONTEND_ROOT/'Resources'
 SVG_ROOT=Path(__file__).resolve().parent/'assets'
 

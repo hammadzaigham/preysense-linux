@@ -15,7 +15,7 @@ user="${1:-$user}"
 group="$(id -gn "$user")"
 [[ $group =~ ^[a-zA-Z_][a-zA-Z0-9_-]*\$?$ ]] || exit 1
 [[ -f "$src/kernel/preysense.ko" ]] || { echo 'Build linux/kernel before installing'; exit 1; }
-install -d /opt/preysense/linux/assets /opt/preysense/PreySense.Frontend/Resources /opt/preysense/licenses
+install -d /opt/preysense/linux/assets /opt/preysense/linux/assets/Resources /opt/preysense/licenses
 install -m 644 "$src/"*.py /opt/preysense/linux/
 install -d /opt/preysense/linux/audio_backend
 install -m 644 "$src/audio_backend/"* /opt/preysense/linux/audio_backend/
@@ -28,8 +28,8 @@ install -m 644 "$src/assets/"*.svg "$src/assets/"*.json /opt/preysense/linux/ass
 install -m 644 "$src/kernel/COPYING" /opt/preysense/licenses/GPL-2.0
 install -m 644 "$src/../LICENSE" /opt/preysense/licenses/MIT
 install -m 755 "$src/hardware-permissions.sh" /opt/preysense/hardware-permissions.sh
-install -m 644 "$src/../PreySense.Frontend/Resources/"*.png "$src/../PreySense.Frontend/Resources/Font.otf" /opt/preysense/PreySense.Frontend/Resources/
-install -m 644 "$src/../PreySense.Frontend/appicon.svg" /opt/preysense/PreySense.Frontend/
+install -m 644 "$src/assets/Resources/"*.png "$src/assets/Resources/Font.otf" /opt/preysense/linux/assets/Resources/
+install -m 644 "$src/assets/appicon.svg" /opt/preysense/linux/assets/
 
 # Check Secure Boot state
 secure_boot_active=0
@@ -135,7 +135,7 @@ GenericName=Acer Control Center
 Comment=Control your Acer laptop
 Keywords=acer;predator;preysense;prey;sense;
 Exec=/usr/local/bin/preysense
-Icon=/opt/preysense/PreySense.Frontend/appicon.svg
+Icon=/opt/preysense/linux/assets/appicon.svg
 Categories=Settings;HardwareSettings;
 Terminal=false
 EOF

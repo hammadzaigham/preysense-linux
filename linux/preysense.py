@@ -377,7 +377,7 @@ class Window(QMainWindow):
         self.settings = QSettings('PreySense', 'Linux')
         self.setWindowTitle('PreySense · Linux')
         self.resize(840, 650)
-        icon = Path(__file__).resolve().parent.parent / 'PreySense.Frontend/appicon.svg'
+        icon = Path(__file__).resolve().parent / 'assets/appicon.svg'
         self.setWindowIcon(QIcon(str(icon)))
         self.colors = [QColor(c) for c in self.settings.value('colors', ['#28d8ca']*4)]
         self.thread = QThread(self)
@@ -787,7 +787,7 @@ class Window(QMainWindow):
         if enabled:
             target.parent.mkdir(parents=True,exist_ok=True)
             script = Path(__file__).resolve()
-            target.write_text(f'[Desktop Entry]\nType=Application\nName=PreySense\nGenericName=Acer Control Center\nComment=Control your Acer laptop\nKeywords=acer;predator;preysense;prey;sense;\nExec=/usr/bin/python3 "{script}" --tray\nIcon={script.parent.parent}/PreySense.Frontend/appicon.svg\n')
+            target.write_text(f'[Desktop Entry]\nType=Application\nName=PreySense\nGenericName=Acer Control Center\nComment=Control your Acer laptop\nKeywords=acer;predator;preysense;prey;sense;\nExec=/usr/bin/python3 "{script}" --tray\nIcon={script.parent}/assets/appicon.svg\n')
         else: target.unlink(missing_ok=True)
     def closeEvent(self,event):
         if self.quitting: event.accept(); return

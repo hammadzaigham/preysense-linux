@@ -15,7 +15,7 @@ class WindowTitleBar(QWidget):
         layout=QHBoxLayout(self);layout.setContentsMargins(8,0,0,0);layout.setSpacing(0)
         icon=QLabel();icon.setFixedSize(16,16)
         from icon_assets import svg_icon_pixmap
-        icon.setPixmap(svg_icon_pixmap(Path(__file__).resolve().parent.parent/'PreySense.Frontend/appicon.svg',16))
+        icon.setPixmap(svg_icon_pixmap(Path(__file__).resolve().parent/'assets/appicon.svg',16))
         layout.addWidget(icon);layout.addSpacing(6)
         self.brand=QLabel('PreySense');self.brand.setObjectName('windowBrand');layout.addWidget(self.brand)
         self.subtitle=QLabel(' • '+title if title else '');self.subtitle.setObjectName('windowSubtitle');layout.addWidget(self.subtitle)

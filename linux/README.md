@@ -2,7 +2,7 @@
 
 Native PySide6 port retaining the Windows design and the user's selected Linux
 feature scope. Supported development hardware: Acer Predator PHN16S-71 BIOSV1.28,
-Fedora45 KDE. The original Windows projects remain intact.
+Fedora45 KDE. The Windows design reference is available in the original PreySense repository.
 
 ```sh
 ./linux/setup.sh

@@ -23,4 +23,4 @@ Run setup as your desktop user. It installs missing dependencies, configures the
 - [Supported features](docs/linux/features.md)
 - [Troubleshooting](docs/linux/troubleshooting.md)
 
-The Windows source is retained as the design and implementation reference. Its [original README](README.windows.md) describes the Windows version, not Linux capabilities.
+Based on [PreySense for Windows](https://github.com/hammadzaigham/PreySense).

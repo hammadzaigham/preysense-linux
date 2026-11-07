@@ -38,12 +38,12 @@ No firmware, NVIDIA driver or proprietary DTS files are bundled.
 %build
 
 %install
-install -d %{buildroot}/opt/preysense/linux/assets %{buildroot}/opt/preysense/PreySense.Frontend/Resources
+install -d %{buildroot}/opt/preysense/linux/assets %{buildroot}/opt/preysense/linux/assets/Resources
 install -m 644 linux/*.py %{buildroot}/opt/preysense/linux/
 install -m 644 linux/assets/*.svg linux/assets/*.json %{buildroot}/opt/preysense/linux/assets/
 cp -a linux/kwin linux/audio_backend %{buildroot}/opt/preysense/linux/
-install -m 644 PreySense.Frontend/Resources/*.png PreySense.Frontend/Resources/Font.otf %{buildroot}/opt/preysense/PreySense.Frontend/Resources/
-install -m 644 PreySense.Frontend/appicon.svg %{buildroot}/opt/preysense/PreySense.Frontend/
+install -m 644 linux/assets/Resources/*.png linux/assets/Resources/Font.otf %{buildroot}/opt/preysense/linux/assets/Resources/
+install -m 644 linux/assets/appicon.svg %{buildroot}/opt/preysense/linux/assets/
 install -m 755 linux/hardware-permissions.sh %{buildroot}/opt/preysense/hardware-permissions.sh
 install -d %{buildroot}/opt/preysense/docs/linux %{buildroot}/opt/preysense/licenses
 install -m 644 docs/linux/*.md %{buildroot}/opt/preysense/docs/linux/

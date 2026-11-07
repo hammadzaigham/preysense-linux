@@ -11,7 +11,7 @@ def build(output):
         top=Path(directory)
         for name in ('SOURCES','SPECS','BUILD','BUILDROOT','RPMS','SRPMS'):(top/name).mkdir()
         files=set(root.joinpath('linux').glob('*.py'))|set(root.joinpath('linux').glob('*.sh'))|{root/'LICENSE'}
-        for pattern in ('linux/assets/*','linux/audio_backend/*','linux/kwin/**/*','linux/packaging/rpm/*','docs/linux/*.md','PreySense.Frontend/Resources/*.png','PreySense.Frontend/Resources/Font.otf','PreySense.Frontend/appicon.svg'):
+        for pattern in ('linux/assets/*','linux/audio_backend/*','linux/kwin/**/*','linux/packaging/rpm/*','docs/linux/*.md','linux/assets/Resources/*.png','linux/assets/Resources/Font.otf','linux/assets/appicon.svg'):
             files.update(p for p in root.glob(pattern) if p.is_file())
         for name in ('preysense.c','Makefile','dkms.conf','COPYING'):files.add(root/'linux/kernel'/name)
         archive=top/'SOURCES'/f'preysense-{__version__}.tar.gz'

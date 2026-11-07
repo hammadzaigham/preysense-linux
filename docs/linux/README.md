@@ -1,7 +1,6 @@
 # PreySense for Linux documentation
 
-This is the Linux-specific guide. The original Windows documentation remains in
-`docs/` and describes different APIs, drivers and installation paths.
+This repository contains the Linux app. Windows source and documentation are available in [the original repository](https://github.com/hammadzaigham/PreySense).
 
 The Linux port is developed and tested on an Acer Predator PHN16S-71, BIOS V1.28,
 Fedora 45 KDE, kernel 7.2.15-300.fc45.x86_64. Other models are not claimed supported;
@@ -30,7 +29,6 @@ the OEM hardware bridge deliberately checks this model before loading.
 - [Troubleshooting and recovery](troubleshooting.md)
 - [Calibration and observed defaults](calibration.md)
 - [Firmware parity audit](parity-audit.md)
-- [Remaining parity work](../../linux/REMAINING.md)
 - [GPU mode and driver notes](../../linux/README.md#gpu-modes-and-nvidia-driver)
 
 Status is intentionally split between a verified software path, a firmware/HID
@@ -39,4 +37,4 @@ lighting report does not prove the lid visibly changed, and injected key tests
 do not prove a particular physical button emitted the expected event.
 
 The working checkout is `/home/hammad/Development/PreySense`, branch `linux-port`.
-Linux implementation is in `linux/`; Windows .NET/WPF projects remain intact.
+Linux implementation is in `linux/`; shared visual assets are in `linux/assets/`.

@@ -7,7 +7,7 @@ from PySide6.QtWidgets import QWidget,QVBoxLayout,QHBoxLayout,QLabel,QPushButton
 from hardware import MODES
 from version import __version__
 
-ASSETS=Path(__file__).resolve().parent.parent/'PreySense.Frontend'
+ASSETS=Path(__file__).resolve().parent/'assets'
 
 def get_dpr():
     app = QApplication.instance()

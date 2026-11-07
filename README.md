@@ -1,13 +1,16 @@
-# PreySense Linux v1.0.0
+# PreySense Linux
 
-Native Linux control app for Acer Predator laptops.
-Developed and tested on the Acer Predator Helios Neo 16S PHN16S-71 with Fedora KDE.
+A native Linux control application for Acer Predator laptops, featuring performance modes, fan curves, CPU power limits, RGB lighting, and hardware telemetry.
 
-## Install on Fedora 45 (RPM)
+Tested on the **Acer Predator Helios Neo 16S (PHN16S-71)** on Fedora KDE.
 
-[Download PreySense 1.0.0 for Fedora 45 (x86_64)](https://github.com/hammadzaigham/preysense-linux/releases/download/v1.0.0/preysense-1.0.0-1.fc45.x86_64.rpm)
+---
 
-After downloading, run:
+## Installation
+
+### Fedora (RPM)
+
+Download the latest RPM from [Releases](https://github.com/hammadzaigham/preysense-linux/releases/tag/v1.0.0):
 
 ```sh
 cd ~/Downloads
@@ -16,14 +19,9 @@ preysense-setup
 preysense
 ```
 
-Run `preysense-setup` as your desktop user. The development RPM package is unsigned. With Secure Boot enabled, `preysense-setup` automatically detects Secure Boot status, checks your DKMS signing keys, and requests MOK certificate enrollment if needed. Follow the [kernel driver signing and key enrollment instructions](docs/linux/kernel-driver-signing.md) for details on the one-time reboot enrollment process.
-If you already installed from source, follow the [migration instructions](docs/linux/rpm.md#existing-development-installation) first.
-See [all release downloads](https://github.com/hammadzaigham/preysense-linux/releases/tag/v1.0.0).
+> **Secure Boot Note:** If Secure Boot is enabled, `preysense-setup` will automatically detect your key status and guide you through enrolling the driver signing key via MOK Manager. See the [Driver Signing Guide](docs/linux/kernel-driver-signing.md) for details.
 
-Driver signing and DKMS module verification are integrated into `preysense-setup` (and `./linux/setup.sh`). You can also run the helper script manually at any time:
-`sudo /opt/preysense/linux/sign-driver.sh` (or `sudo ./linux/sign-driver.sh` in the source checkout); see the [Secure Boot guide](docs/linux/kernel-driver-signing.md).
-
-## Install from source
+### Build from Source
 
 ```sh
 git clone https://github.com/hammadzaigham/preysense-linux.git
@@ -32,18 +30,32 @@ cd preysense-linux
 preysense
 ```
 
-Run setup as your desktop user. It installs missing dependencies and configures the hardware helper. NVIDIA driver installation is separate.
+---
+
+## Features
+
+- **Performance Modes:** Quiet, Balanced, Performance, and Turbo modes with automatic power-source switching (AC / Battery).
+- **Fan Controls:** Auto, Max, and interactive custom fan curves.
+- **CPU Tuning:** Intel RAPL power limits (PL1, PL2, Tau) and Turbo Boost toggle.
+- **RGB Lighting:** 4-zone keyboard backlight and logo lighting controls, dynamic animations, and idle timeout.
+- **Display & Hardware:** Refresh rate switching, battery charge limit (80%), and power-off USB charging.
+- **On-Screen Metrics:** Real-time CPU/GPU temperatures, clocks, utilization, and fan RPM overlay.
+
+---
 
 ## Documentation
 
-- [Linux app and setup guide](linux/README.md)
-- [Linux documentation](docs/linux/README.md)
-- [Installation](docs/linux/installation.md)
-- [RPM packaging](docs/linux/rpm.md)
-- [Supported features](docs/linux/features.md)
+- [App & Setup Guide](linux/README.md)
+- [Installation Guide](docs/linux/installation.md)
+- [Kernel Driver Signing & Secure Boot](docs/linux/kernel-driver-signing.md)
+- [RPM Packaging](docs/linux/rpm.md)
+- [Features Reference](docs/linux/features.md)
 - [Troubleshooting](docs/linux/troubleshooting.md)
+
+---
 
 ## Acknowledgments
 
 - Based on [PreySense for Windows](https://github.com/hammadzaigham/PreySense).
+
 

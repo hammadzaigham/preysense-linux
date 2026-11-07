@@ -171,6 +171,16 @@ def update(window,data):
             if index>=0:combo.setCurrentIndex(index)
             combo.blockSignals(False)
         window.load_fan_policy();window.load_power_policy();window.profile_editors_initialized=True
+    elif hasattr(window,'power_profile') and not window.power_profile.hasFocus():
+        try:current=int(data.get('profile') or 1)
+        except ValueError:current=1
+        if window.power_profile.currentData() != current:
+            idx = window.power_profile.findData(current)
+            if idx >= 0:
+                window.power_profile.blockSignals(True)
+                window.power_profile.setCurrentIndex(idx)
+                window.power_profile.blockSignals(False)
+                window.load_power_policy()
     window.original_auto.setChecked(window.refresh_auto.isChecked());window.original_auto.setEnabled(window.refresh_auto.isEnabled())
     display=data.get('display')
     current=next((m for m in display['modes'] if m['id']==display['current']),None) if display else None
@@ -422,6 +432,18 @@ def finish_control_windows(window):
     t.addWidget(tau_slider)
     window.power_apply.setText('Apply');window.power_apply.setMinimumHeight(34);window.power_apply.clicked.disconnect();window.power_apply.clicked.connect(lambda:window.apply_power_policy(False))
     footer=QHBoxLayout();reset=action('Reset');reset.clicked.connect(window.reset_power_policy);footer.addWidget(reset);footer.addWidget(window.power_apply);save=action('Save');window.power_save=save;save.clicked.connect(lambda:window.apply_power_policy(True));footer.addWidget(save);footer.setContentsMargins(14,10,14,16);footer.setSpacing(4);tuning_footer=QWidget();tuning_footer.setLayout(footer);tuning.layout().addWidget(tuning_footer);tuning.adjustSize()
+    def sync_tuning_on_show(event):
+        try:current=int(getattr(window,'_confirmed_profile',None) or 1)
+        except (ValueError,TypeError):current=1
+        if window.power_profile.currentData()!=current:
+            idx=window.power_profile.findData(current)
+            if idx>=0:
+                window.power_profile.blockSignals(True)
+                window.power_profile.setCurrentIndex(idx)
+                window.power_profile.blockSignals(False)
+                window.load_power_policy()
+        QDialog.showEvent(tuning,event)
+    tuning.showEvent=sync_tuning_on_show
     window.profile_editors_initialized=False
 
     from documentation_ui import DocumentationWindow

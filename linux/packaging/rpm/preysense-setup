@@ -3,4 +3,8 @@ set -eu
 if [ "$(id -u)" = 0 ]; then echo 'Run preysense-setup as the desktop user.' >&2; exit 1; fi
 sudo /usr/bin/python3 -I /opt/preysense/linux/rpm_configure.py "$(id -un)"
 /usr/bin/python3 /opt/preysense/linux/setup_audio.py
-echo 'PreySense hardware permissions and per-user DTS setup are ready.'
+if [ -x /opt/preysense/linux/sign-driver.sh ]; then
+    echo 'Checking kernel module signing and Secure Boot status...'
+    sudo /opt/preysense/linux/sign-driver.sh || echo 'Kernel module signing helper exited with an error. Review output above.' >&2
+fi
+echo 'PreySense hardware permissions, audio setup, and driver signing checks are complete.'

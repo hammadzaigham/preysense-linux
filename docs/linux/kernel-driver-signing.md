@@ -10,12 +10,42 @@ not sign NVIDIA drivers and do not sign the RPM package. If Secure Boot is off,
 key enrollment is normally unnecessary. If your current DKMS key is already
 enrolled and the signed module loads, no additional key or enrollment is needed.
 
-## Signing script
+## Automatic setup integration
 
-After installing PreySense, run from the source checkout:
+The driver signing and MOK enrollment check is built directly into the PreySense setup process:
+
+- **RPM Package:** Run `preysense-setup` as your desktop user after installing the RPM. It automatically runs the signing helper with `sudo`.
+- **Source Installation:** Run `./linux/setup.sh` as your desktop user. It automatically invokes the signing helper after building the module.
+
+If Secure Boot is enabled and your system's MOK certificate is not yet enrolled, setup will prompt you to set a temporary enrollment password and output instructions to enroll the certificate in MOK Manager on the next reboot.
+
+### Before reboot
+1. When prompted by `preysense-setup` (or `./linux/setup.sh`), enter a temporary one-time password for MOK enrollment.
+2. Confirm the prompt finishes and instructs you to reboot.
+
+### After reboot (in MOK Manager)
+1. Your laptop reboots into the blue **MOK Management** screen (Shim UEFI key manager).
+2. Select **Enroll MOK** -> **Continue** -> **Yes**.
+3. Enter the temporary one-time password you created.
+4. Select **Reboot**.
+
+### After returning to Linux
+Once booted back into your desktop session:
+- For RPM users: rerun `preysense-setup` (or `sudo /opt/preysense/linux/sign-driver.sh`).
+- For source users: rerun `./linux/setup.sh` (or `sudo ./linux/sign-driver.sh`).
+
+The helper will verify that the certificate is enrolled, build and install the DKMS module signed with your trusted key, and verify the signature.
+
+## Manual signing script
+
+You can also run the signing script directly at any time:
 
 ```sh
+# From source checkout:
 sudo ./linux/sign-driver.sh
+
+# Or from RPM installation:
+sudo /opt/preysense/linux/sign-driver.sh
 ```
 
 It checks prerequisites and the key/certificate pair, requests enrollment if

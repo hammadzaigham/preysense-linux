@@ -28,6 +28,7 @@ install -m 644 "$src/assets/"*.svg "$src/assets/"*.json /opt/preysense/linux/ass
 install -m 644 "$src/kernel/COPYING" /opt/preysense/licenses/GPL-2.0
 install -m 644 "$src/../LICENSE" /opt/preysense/licenses/MIT
 install -m 755 "$src/hardware-permissions.sh" /opt/preysense/hardware-permissions.sh
+install -m 755 "$src/sign-driver.sh" /opt/preysense/linux/sign-driver.sh
 install -m 644 "$src/assets/Resources/"*.png "$src/assets/Resources/Font.otf" /opt/preysense/linux/assets/Resources/
 install -m 644 "$src/assets/appicon.svg" /opt/preysense/linux/assets/
 

@@ -21,4 +21,8 @@ fi
 sudo "$src/setup.sh" --dependencies
 PREYSENSE_SETUP_DONE=1 "$src/install.sh"
 python3 "$src/setup_audio.py"
+if [[ -x "$src/sign-driver.sh" ]]; then
+    echo 'Checking kernel module signing and Secure Boot status...'
+    sudo "$src/sign-driver.sh" || echo 'Kernel module signing helper exited with an error. Review output above.' >&2
+fi
 echo 'PreySense and the per-user DTS backend are installed. Launch preysense.'

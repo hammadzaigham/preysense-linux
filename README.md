@@ -16,12 +16,12 @@ preysense-setup
 preysense
 ```
 
-Run `preysense-setup` as your desktop user. The development RPM package is unsigned. With Secure Boot enabled, follow the [kernel driver signing and key enrollment instructions](docs/linux/kernel-driver-signing.md).
+Run `preysense-setup` as your desktop user. The development RPM package is unsigned. With Secure Boot enabled, `preysense-setup` automatically detects Secure Boot status, checks your DKMS signing keys, and requests MOK certificate enrollment if needed. Follow the [kernel driver signing and key enrollment instructions](docs/linux/kernel-driver-signing.md) for details on the one-time reboot enrollment process.
 If you already installed from source, follow the [migration instructions](docs/linux/rpm.md#existing-development-installation) first.
 See [all release downloads](https://github.com/hammadzaigham/preysense-linux/releases/tag/v1.0.0).
 
-For driver signing after installation, the source checkout includes
-`sudo ./linux/sign-driver.sh`; see the [Secure Boot guide](docs/linux/kernel-driver-signing.md#signing-script).
+Driver signing and DKMS module verification are integrated into `preysense-setup` (and `./linux/setup.sh`). You can also run the helper script manually at any time:
+`sudo /opt/preysense/linux/sign-driver.sh` (or `sudo ./linux/sign-driver.sh` in the source checkout); see the [Secure Boot guide](docs/linux/kernel-driver-signing.md).
 
 ## Install from source
 

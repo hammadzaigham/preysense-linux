@@ -2,10 +2,6 @@
 set -euo pipefail
 [[ $EUID == 0 ]] || exec sudo "$0" "$@"
 python3 -I "$(dirname -- "$0")/service_lifecycle.py" --remove
-systemctl disable --now preysense-acpi.service || true
-if [[ -d /sys/module/preysense_acpi ]]; then modprobe -r preysense_acpi; fi
-rm -f /etc/systemd/system/preysense-acpi.service
-rm -f /lib/modules/*/extra/preysense_acpi.ko /lib/modules/*/extra/preysense_acpi.ko.xz /lib/modules/*/extra/preysense_acpi.ko.zst
 systemctl disable --now preysense-hardware.service || true
 rm -f /etc/systemd/system/preysense-hardware.service /etc/udev/rules.d/70-preysense.rules /etc/udev/hwdb.d/90-preysense-keyboard.hwdb /usr/local/bin/preysense /usr/local/bin/preysense-fps /usr/local/bin/preysensed /usr/share/applications/preysense.desktop
 if command -v dkms >/dev/null 2>&1; then
@@ -39,5 +35,8 @@ depmod -a
 if [[ -n ${SUDO_USER:-} ]]; then
  user_home="$(getent passwd "$SUDO_USER" | cut -d: -f6)"
  rm -f "$user_home/.config/autostart/preysense.desktop"
+ rm -rf "$user_home/.config/PreySense"
+ rm -rf "$user_home/.local/share/kwin/effects/preysense-instant"
+ rm -f "$user_home/.local/share/applications/preysense.desktop"
 fi
-printf 'PreySense system files removed. Source and user preferences retained.\n'
+printf 'PreySense system files and user preferences removed.\n'

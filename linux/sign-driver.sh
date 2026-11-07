@@ -56,7 +56,10 @@ configured="$(bash -c '
 ' bash "$KERNEL")"
 mapfile -t configured_paths <<< "$configured"
 ((${#configured_paths[@]} == 2)) || { echo 'Cannot resolve DKMS signing paths.' >&2; exit 1; }
-if [[ "$KEY" != "${configured_paths[0]}" || "$CERT" != "${configured_paths[1]}" ]]; then
+if ((!CUSTOM)); then
+    KEY="${configured_paths[0]}"
+    CERT="${configured_paths[1]}"
+elif [[ "$KEY" != "${configured_paths[0]}" || "$CERT" != "${configured_paths[1]}" ]]; then
     echo 'Selected key/certificate must match the existing DKMS configuration.' >&2
     printf 'Rerun with --key %q --cert %q\n' "${configured_paths[0]}" "${configured_paths[1]}" >&2
     exit 1
@@ -78,7 +81,8 @@ certhash="$(openssl x509 -inform DER -in "$CERT" -pubkey -noout | openssl pkey -
 sb_state="$(mokutil --sb-state 2>&1 || true)"
 echo "$sb_state"
 if [[ "$sb_state" == *'SecureBoot enabled'* ]]; then
-    if ! mokutil --test-key "$CERT" >/dev/null 2>&1; then
+    test_out="$(mokutil --test-key "$CERT" 2>&1 || true)"
+    if ! echo "$test_out" | grep -qi 'already enrolled'; then
         echo 'Requesting certificate enrollment. Set a one-time password when prompted.'
         mokutil --import "$CERT"
         cat <<'STEPS'

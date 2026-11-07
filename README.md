@@ -3,7 +3,24 @@
 Native Linux control app for Acer Predator laptops, retaining the PreySense Windows design.
 Developed and tested on the Acer Predator Helios Neo 16S PHN16S-71 with Fedora KDE.
 
-## Install
+## Install on Fedora 45 (RPM)
+
+[Download PreySense 1.0.0 for Fedora 45 (x86_64)](https://github.com/hammadzaigham/preysense-linux/releases/download/v1.0.0/preysense-1.0.0-1.fc45.x86_64.rpm)
+
+An RPM is an installable Fedora package. After downloading, run:
+
+```sh
+cd ~/Downloads
+sudo dnf install ./preysense-1.0.0-1.fc45.x86_64.rpm
+preysense-setup
+preysense
+```
+
+Run `preysense-setup` as your desktop user. The development package is unsigned.
+If you already installed from source, follow the [migration instructions](docs/linux/rpm.md#existing-development-installation) first.
+See [all release downloads](https://github.com/hammadzaigham/preysense-linux/releases/tag/v1.0.0).
+
+## Install from source
 
 ```sh
 git clone https://github.com/hammadzaigham/preysense-linux.git

@@ -4,7 +4,7 @@ Version:        1.0.0
 Release:        1%{?dist}
 Summary:        Acer Predator hardware controls for Linux
 License:        MIT AND GPL-2.0-only
-URL:            https://github.com/hammadzaigham/PreySense
+URL:            https://github.com/hammadzaigham/preysense-linux
 Source0:        %{name}-%{version}.tar.gz
 BuildArch:      x86_64
 BuildRequires:  gcc

@@ -45,17 +45,34 @@ fails. Application updates refresh the GUI/assets without replacing NVIDIA.
 Secure Boot validation need not be disabled; the signed driver must be trusted.
 The app does not install custom ACPI tables, OpenCore or boot-table patches.
 
-## Remove PreySense
+## Uninstallation
+
+### RPM Package
+
+If you installed PreySense using the Fedora RPM:
+
+```sh
+sudo dnf remove preysense
+```
+
+The RPM pre-removal script automatically stops and disables `preysense-hardware.service`, unregisters the DKMS driver module (`dkms remove -m preysense -v 2.5.0 --all`), restores your default keyboard mappings, and removes system binaries and udev rules.
+
+To also purge your personal configuration files:
+```sh
+rm -rf ~/.config/PreySense
+```
+
+### Source Installation
+
+If you installed from source using `./linux/setup.sh` or `./linux/install.sh`:
 
 ```sh
 sudo ./linux/uninstall.sh
 ```
 
-This stops/unloads the OEM bridge, restores automatic fan control when firmware
-accepts the request, removes app/service/launcher/rule files, revokes additional
-RAPL and boost write permissions, and removes the app's login entry. Source and
-user preferences remain. The keyboard hwdb entry is removed and the saved original Predator mappings are restored in the running kernel. The backup is captured before installation; this development install migrates the two baseline values observed before its first mapping change.
-The NVIDIA driver is a separate installation.
+This stops and unloads the OEM driver bridge, restores automatic fan control, unregisters the DKMS module, deletes systemd services and udev rules, restores original keyboard hwdb mappings, and removes user preferences and desktop launchers.
+
+---
 
 ### Configured RAM speed
 

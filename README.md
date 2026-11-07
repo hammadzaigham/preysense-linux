@@ -32,6 +32,30 @@ preysense
 
 ---
 
+## Uninstallation
+
+### If installed via RPM
+
+To completely remove the RPM package, DKMS kernel module, and background services:
+
+```sh
+sudo dnf remove preysense
+```
+
+*(Optional: To also remove personal settings, run `rm -rf ~/.config/PreySense`)*
+
+### If installed from Source
+
+Run the uninstaller script from your source folder:
+
+```sh
+sudo ./linux/uninstall.sh
+```
+
+This unloads the kernel bridge, disables system services, unregisters DKMS, removes installed binaries, and clears local configuration.
+
+---
+
 ## Features
 
 - **Performance Modes:** Quiet, Balanced, Performance, and Turbo modes with automatic power-source switching (AC / Battery).

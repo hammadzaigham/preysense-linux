@@ -80,11 +80,11 @@ class FanGraph(QWidget):
         painter = QPainter(self); painter.setRenderHint(QPainter.Antialiasing); rect = self.plot()
         grid = QColor(color('BorderSecondColor', '#2a2a2a')); text = QColor(color('TextSecondaryColor', '#a8a8a8'))
         label_font = painter.font(); label_font.setPixelSize(10); painter.setFont(label_font)
-        for value in range(0, 101, 20):
+        for value in range(0, 101, 10):
             y = rect.bottom() - value / 100 * rect.height(); painter.setPen(QPen(grid, 1))
             painter.drawLine(QPointF(rect.left(), y), QPointF(rect.right(), y)); painter.setPen(text)
             painter.drawText(QRectF(0, y - 7, 33, 14), Qt.AlignRight | Qt.AlignVCenter, f'{value}%')
-        for temperature in range(40, 101, 10):
+        for temperature in range(40, 101, 5):
             x = rect.left() + (temperature - 40) / 60 * rect.width(); painter.setPen(QPen(grid, 1))
             painter.drawLine(QPointF(x, rect.top()), QPointF(x, rect.bottom())); painter.setPen(text)
             painter.drawText(QRectF(x - 16, rect.bottom() + 7, 32, 16), Qt.AlignCenter, f'{temperature}°')

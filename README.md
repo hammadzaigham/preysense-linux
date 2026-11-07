@@ -20,6 +20,9 @@ Run `preysense-setup` as your desktop user. The development RPM package is unsig
 If you already installed from source, follow the [migration instructions](docs/linux/rpm.md#existing-development-installation) first.
 See [all release downloads](https://github.com/hammadzaigham/preysense-linux/releases/tag/v1.0.0).
 
+For driver signing after installation, the source checkout includes
+`sudo ./linux/sign-driver.sh`; see the [Secure Boot guide](docs/linux/kernel-driver-signing.md#signing-script).
+
 ## Install from source
 
 ```sh

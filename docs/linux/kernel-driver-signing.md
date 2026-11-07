@@ -10,6 +10,31 @@ not sign NVIDIA drivers and do not sign the RPM package. If Secure Boot is off,
 key enrollment is normally unnecessary. If your current DKMS key is already
 enrolled and the signed module loads, no additional key or enrollment is needed.
 
+## Signing script
+
+After installing PreySense, run from the source checkout:
+
+```sh
+sudo ./linux/sign-driver.sh
+```
+
+It checks prerequisites and the key/certificate pair, requests enrollment if
+needed, then builds and installs the signed driver through DKMS. If enrollment
+is requested, complete the MOK Manager steps after reboot and rerun the script.
+It does not reboot, unload the active driver, change global DKMS settings, or
+disable validation. Unknown Secure Boot state stops the script.
+
+For an existing custom DKMS key, specify both configured paths:
+
+```sh
+sudo ./linux/sign-driver.sh --key /path/to/private.key --cert /path/to/public.der
+```
+
+These options verify the existing DKMS configuration; they do not override it.
+`--kernel VERSION` targets another installed kernel with matching build files.
+PKCS#11 keys are not supported by this file-based script. The manual steps below
+are available if you prefer to perform each stage yourself.
+
 ## 1. Check your setup
 
 ```sh

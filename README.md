@@ -16,7 +16,7 @@ preysense-setup
 preysense
 ```
 
-Run `preysense-setup` as your desktop user. The development package is unsigned; see [manual RPM signing and verification](docs/linux/rpm.md#manual-rpm-signing-and-verification) for signing instructions. RPM signing does not replace Secure Boot driver signing.
+Run `preysense-setup` as your desktop user. The development RPM package is unsigned. With Secure Boot enabled, follow the [kernel driver signing and key enrollment instructions](docs/linux/kernel-driver-signing.md).
 If you already installed from source, follow the [migration instructions](docs/linux/rpm.md#existing-development-installation) first.
 See [all release downloads](https://github.com/hammadzaigham/preysense-linux/releases/tag/v1.0.0).
 

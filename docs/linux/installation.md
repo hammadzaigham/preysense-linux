@@ -92,3 +92,5 @@ rule allows only start/stop of this fixed service, not other units or
 arbitrary root commands. The GUI remains unprivileged. Shared audio, PipeWire and
 NVIDIA services are not managed by this lifecycle. Voltage telemetry and its
 MSR service have been removed. No helper polls CPU or GPU voltage.
+
+See [kernel driver signing and key enrollment](kernel-driver-signing.md) for the Secure Boot setup steps.

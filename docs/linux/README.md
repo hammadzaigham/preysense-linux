@@ -8,6 +8,7 @@ the OEM hardware bridge deliberately checks this model before loading.
 
 - [Installation, updates and removal](installation.md)
 - [Fedora RPM packages](rpm.md)
+- [Kernel driver signing and Secure Boot](kernel-driver-signing.md)
 - [Features, settings and differences from Windows](features.md)
 - [First-install calibration and missing-data backfill](calibration.md)
 - [Linux power profile mapping](system-power.md)

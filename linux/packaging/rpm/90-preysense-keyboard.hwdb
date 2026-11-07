@@ -1,0 +1,3 @@
+evdev:atkbd:dmi:*svnAcer:pnPredatorPHN16S-71:*
+ KEYBOARD_KEY_75=prog3
+ KEYBOARD_KEY_f5=prog3

@@ -44,3 +44,8 @@ tools/rea/
 tools/rw/
 tools/Configuration.pdf
 tools/OpenCore_PreyBoost_EFI/OpenCore-*-RELEASE.zip
+
+# Local agent coordination and editing backups
+/AGENT_HANDOFF.md
+/linux/REMAINING.md
+*.py.new

@@ -1,0 +1,122 @@
+{
+  "WindowBgColor": {
+    "Dark": "#1C1C1C",
+    "Light": "#F5F6F8"
+  },
+  "CardBgColor": {
+    "Dark": "#1C1C1C",
+    "Light": "#FFFFFF"
+  },
+  "ButtonMainColor": {
+    "Dark": "#2E2E2E",
+    "Light": "#FFFFFF"
+  },
+  "ButtonSecondColor": {
+    "Dark": "#242424",
+    "Light": "#EEF0F3"
+  },
+  "ButtonHoverColor": {
+    "Dark": "#383838",
+    "Light": "#E2E6EB"
+  },
+  "BorderMainColor": {
+    "Dark": "#373737",
+    "Light": "#B9C0C9"
+  },
+  "BorderSecondColor": {
+    "Dark": "#2A2A2A",
+    "Light": "#D8DDE3"
+  },
+  "TextPrimaryColor": {
+    "Dark": "#F0F0F0",
+    "Light": "#17191C"
+  },
+  "IconForegroundColor": {
+    "Dark": "#FFFFFF",
+    "Light": "#000000"
+  },
+  "TextSecondaryColor": {
+    "Dark": "#A8A8A8",
+    "Light": "#535B66"
+  },
+  "TextMutedColor": {
+    "Dark": "#787878",
+    "Light": "#747E8A"
+  },
+  "TextOnAccentColor": {
+    "Dark": "#FFFFFF",
+    "Light": "#17191C"
+  },
+  "ControlTrackColor": {
+    "Dark": "#282B32",
+    "Light": "#DDE1E6"
+  },
+  "DisabledControlColor": {
+    "Dark": "#3A3A3A",
+    "Light": "#C5CAD1"
+  },
+  "ControlTrackFillColor": {
+    "Dark": "#4A5260",
+    "Light": "#98A3B0"
+  },
+  "ControlThumbColor": {
+    "Dark": "#5C6576",
+    "Light": "#5C6576"
+  },
+  "ControlThumbHoverColor": {
+    "Dark": "#758197",
+    "Light": "#758197"
+  },
+  "ControlThumbPressedColor": {
+    "Dark": "#8B97AF",
+    "Light": "#8B97AF"
+  },
+  "ControlSelectedColor": {
+    "Dark": "#333742",
+    "Light": "#DCEEFF"
+  },
+  "ControlSelectedBorderColor": {
+    "Dark": "#505766",
+    "Light": "#78BDF0"
+  },
+  "ControlFocusedBorderColor": {
+    "Dark": "#4E5564",
+    "Light": "#65ADE5"
+  },
+  "ControlActiveColor": {
+    "Dark": "#3E4450",
+    "Light": "#D7E9F7"
+  },
+  "ControlThumbBorderColor": {
+    "Dark": "#EAEFF5",
+    "Light": "#66717E"
+  },
+  "ToastSurfaceColor": {
+    "Dark": "#D8121216",
+    "Light": "#F2FFFFFF"
+  },
+  "WarningSurfaceColor": {
+    "Dark": "#2A1810",
+    "Light": "#FFF4E8"
+  },
+  "WarningSurfaceSubtleColor": {
+    "Dark": "#251A10",
+    "Light": "#FFF8EF"
+  },
+  "WarningTextColor": {
+    "Dark": "#F5B041",
+    "Light": "#8A4500"
+  },
+  "SuccessSurfaceColor": {
+    "Dark": "#142618",
+    "Light": "#EAF8EF"
+  },
+  "SuccessTextColor": {
+    "Dark": "#82E0AA",
+    "Light": "#176B38"
+  },
+  "PlaceholderTextColor": {
+    "Dark": "#8F8F8F",
+    "Light": "#69727D"
+  }
+}

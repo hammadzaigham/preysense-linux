@@ -15,3 +15,7 @@ Engineering notes for the PHN16S-71 control paths PreySense actually uses. Start
 | [BIOS setup_var offsets](bios_setup_var_offsets.md) | Verified InsydeH2O Setup offsets on this chassis. |
 
 Installer scripts and EFI files live in [`tools/OpenCore_PreyBoost_EFI/`](../tools/OpenCore_PreyBoost_EFI/README.md).
+
+## Linux
+
+See the [Linux documentation](linux/README.md) for the native Linux port, installation, hardware interfaces, audio, tests and recovery.

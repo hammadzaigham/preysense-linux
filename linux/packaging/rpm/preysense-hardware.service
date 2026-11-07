@@ -1,0 +1,16 @@
+[Unit]
+Description=PreySense Acer hardware bridge
+After=systemd-udevd.service
+ConditionPathExists=/sys/class/dmi/id/product_name
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+Environment=PREYSENSE_GROUP=preysense
+ExecStart=/sbin/modprobe preysense
+ExecStartPost=/opt/preysense/hardware-permissions.sh ${PREYSENSE_GROUP}
+ExecStartPost=/usr/bin/python3 -I /opt/preysense/linux/memory_reader.py
+RuntimeDirectory=preysense-memory
+RuntimeDirectoryMode=0755
+ExecStop=/sbin/modprobe -r preysense
+[Install]
+WantedBy=multi-user.target

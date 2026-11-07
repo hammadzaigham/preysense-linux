@@ -1,0 +1,14 @@
+{
+  "KPackageStructure": "KWin/Effect",
+  "KPlugin": {
+    "Id": "preysense-instant",
+    "Name": "PreySense instant windows",
+    "Description": "Suppress compositor animations for PreySense windows only",
+    "Version": "1.0",
+    "License": "MIT",
+    "Category": "Appearance",
+    "EnabledByDefault": false
+  },
+  "X-KDE-Ordering": 0,
+  "X-Plasma-API": "javascript"
+}

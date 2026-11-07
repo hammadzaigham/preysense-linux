@@ -1,0 +1,2 @@
+SUBSYSTEM=="hidraw", KERNELS=="0018:0CF2:5130.*", GROUP="preysense", MODE="0660"
+SUBSYSTEM=="hidraw", KERNELS=="0018:1025:174B.*", GROUP="preysense", MODE="0640"

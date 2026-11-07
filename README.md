@@ -43,4 +43,8 @@ Run setup as your desktop user. It installs missing dependencies, configures the
 - [Supported features](docs/linux/features.md)
 - [Troubleshooting](docs/linux/troubleshooting.md)
 
-Based on [PreySense for Windows](https://github.com/hammadzaigham/PreySense).
+## Acknowledgments
+
+- Based on [PreySense for Windows](https://github.com/hammadzaigham/PreySense).
+- DTS:X Ultra native Linux audio processing powered by [AcerUltraX](https://github.com/fawaz7/AcerUltraX) by Fawaz Al-Ghzawi.
+

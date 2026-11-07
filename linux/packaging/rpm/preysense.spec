@@ -80,6 +80,13 @@ if [ "$1" -eq 0 ]; then
     python3 -I /opt/preysense/linux/keymap.py restore || :
     python3 -I /opt/preysense/linux/rpm_configure.py --remove || :
     dkms remove -m preysense -v 2.5.0 --all || :
+    # Purge user settings and autostart shortcuts across real user accounts
+    for home_dir in /home/*; do
+        [ -d "$home_dir" ] || continue
+        rm -rf "$home_dir/.config/PreySense" || :
+        rm -rf "$home_dir/.local/share/kwin/effects/preysense-instant" || :
+        rm -f "$home_dir/.config/autostart/preysense.desktop" || :
+    done
 fi
 
 %postun

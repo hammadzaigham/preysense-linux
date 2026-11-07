@@ -55,12 +55,7 @@ If you installed PreySense using the Fedora RPM:
 sudo dnf remove preysense
 ```
 
-The RPM pre-removal script automatically stops and disables `preysense-hardware.service`, unregisters the DKMS driver module (`dkms remove -m preysense -v 2.5.0 --all`), restores your default keyboard mappings, and removes system binaries and udev rules.
-
-To also purge your personal configuration files:
-```sh
-rm -rf ~/.config/PreySense
-```
+The RPM pre-removal script automatically stops and disables `preysense-hardware.service`, unregisters the DKMS driver module (`dkms remove -m preysense -v 2.5.0 --all`), restores your default keyboard mappings, purges configuration settings in `~/.config/PreySense`, and removes system binaries and udev rules.
 
 ### Source Installation
 

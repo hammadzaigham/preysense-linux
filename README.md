@@ -36,13 +36,11 @@ preysense
 
 ### If installed via RPM
 
-To completely remove the RPM package, DKMS kernel module, and background services:
+To completely remove the RPM package, DKMS kernel module, background services, and personal settings:
 
 ```sh
 sudo dnf remove preysense
 ```
-
-*(Optional: To also remove personal settings, run `rm -rf ~/.config/PreySense`)*
 
 ### If installed from Source
 

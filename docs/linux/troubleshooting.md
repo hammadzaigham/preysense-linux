@@ -39,21 +39,6 @@ sensor. Stopping should restore the configured0–120second setting;0 disables t
 killed during an effect, explicitly choose the desired timeout after restarting.
 Changing the Logo manually disables software logo synchronization for that session.
 
-## Audio is unavailable or unchanged
-
-```sh
-acerultrax-cli detect
-acerultrax-cli status
-systemctl --user status acerultrax.service
-journalctl --user -u acerultrax.service -n 30
-```
-
-A missing model manifest needs upstream setup/import, not a fake equalizer preset.
-The ALC245 tuning for 10251871 is experimental upstream. Check the actual output
-and profile, DTS power and the distinction between Off and Plain. The daemon may
-be idle with zero streams until something plays; offline rendering verifies DSP
-without playing sound. To undo routing, use `acerultrax-cli autostart off`.
-
 ## GPU modes and reboot-dependent tests
 
 Consult the GPU-mode notes. A firmware boot-setting readback is not

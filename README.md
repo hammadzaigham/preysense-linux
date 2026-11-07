@@ -32,7 +32,7 @@ cd preysense-linux
 preysense
 ```
 
-Run setup as your desktop user. It installs missing dependencies, configures the hardware helper and prepares the audio backend. NVIDIA driver installation is separate.
+Run setup as your desktop user. It installs missing dependencies and configures the hardware helper. NVIDIA driver installation is separate.
 
 ## Documentation
 
@@ -46,5 +46,4 @@ Run setup as your desktop user. It installs missing dependencies, configures the
 ## Acknowledgments
 
 - Based on [PreySense for Windows](https://github.com/hammadzaigham/PreySense).
-- DTS:X Ultra native Linux audio processing powered by [AcerUltraX](https://github.com/fawaz7/AcerUltraX) by Fawaz Al-Ghzawi.
 

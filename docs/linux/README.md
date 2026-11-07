@@ -15,7 +15,6 @@ the OEM hardware bridge deliberately checks this model before loading.
 - [Power-source profile automation](source-profiles.md)
 - [Predator and Turbo keys](hotkeys.md)
 - [Hardware interfaces and permissions](hardware.md)
-- [Audio / DTS:X Ultra](audio.md)
 - [Hardware overlay](overlay.md)
 - [Event-driven background behavior](event-driven.md)
 - [Instant windows and KDE compositor integration](instant-windows.md)

@@ -18,9 +18,6 @@ Requires:       make
 Requires:       kscreen
 Requires:       libkscreen
 Requires:       kf6-kpackage
-Requires:       pipewire
-Requires:       pipewire-pulseaudio
-Requires:       wireplumber
 Requires:       mokutil
 Requires:       systemd
 Requires(pre):  shadow-utils
@@ -29,8 +26,8 @@ AutoReqProv:    no
 %description
 PreySense controls supported Acer Predator PHN16S-71 hardware using a native Qt
 interface and a DKMS bridge. Run preysense-setup as the desktop user after RPM
-installation to grant hardware access and configure the per-user DTS backend.
-No firmware, NVIDIA driver or proprietary DTS files are bundled.
+installation to grant hardware access and verify driver signing.
+No firmware or NVIDIA driver files are bundled.
 
 %prep
 %setup -q
@@ -41,7 +38,7 @@ No firmware, NVIDIA driver or proprietary DTS files are bundled.
 install -d %{buildroot}/opt/preysense/linux/assets %{buildroot}/opt/preysense/linux/assets/Resources
 install -m 644 linux/*.py %{buildroot}/opt/preysense/linux/
 install -m 644 linux/assets/*.svg linux/assets/*.json %{buildroot}/opt/preysense/linux/assets/
-cp -a linux/kwin linux/audio_backend %{buildroot}/opt/preysense/linux/
+cp -a linux/kwin %{buildroot}/opt/preysense/linux/
 install -m 644 linux/assets/Resources/*.png linux/assets/Resources/Font.otf %{buildroot}/opt/preysense/linux/assets/Resources/
 install -m 644 linux/assets/appicon.svg %{buildroot}/opt/preysense/linux/assets/
 install -m 755 linux/hardware-permissions.sh %{buildroot}/opt/preysense/hardware-permissions.sh
@@ -75,7 +72,7 @@ fi
 python3 -I /opt/preysense/linux/keymap.py save || :
 systemd-hwdb update || :
 udevadm control --reload-rules || :
-echo 'Run preysense-setup as the desktop user to finish hardware access and DTS setup.'
+echo 'Run preysense-setup as the desktop user to finish hardware access and driver setup.'
 
 %preun
 if [ "$1" -eq 0 ]; then
@@ -104,4 +101,4 @@ udevadm trigger --subsystem-match=hidraw || :
 
 %changelog
 * Fri Nov 06 2026 PreySense developers - 1.0.0-1
-- Initial Fedora RPM with DKMS source and explicit per-user DTS setup.
+- Initial Fedora RPM with DKMS source.

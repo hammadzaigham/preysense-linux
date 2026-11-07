@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Core installation; setup.sh supplies missing dependencies and per-user DTS setup.
+# Core installation; setup.sh supplies missing dependencies.
 set -euo pipefail
 src="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 user="${SUDO_USER:-$(id -un)}"
@@ -17,8 +17,6 @@ group="$(id -gn "$user")"
 [[ -f "$src/kernel/preysense.ko" ]] || { echo 'Build linux/kernel before installing'; exit 1; }
 install -d /opt/preysense/linux/assets /opt/preysense/linux/assets/Resources /opt/preysense/licenses
 install -m 644 "$src/"*.py /opt/preysense/linux/
-install -d /opt/preysense/linux/audio_backend
-install -m 644 "$src/audio_backend/"* /opt/preysense/linux/audio_backend/
 install -D -m 644 "$src/kwin/preysense-instant/metadata.json" /opt/preysense/linux/kwin/preysense-instant/metadata.json
 install -D -m 644 "$src/kwin/preysense-instant/contents/code/main.js" /opt/preysense/linux/kwin/preysense-instant/contents/code/main.js
 install -d /opt/preysense/docs/linux

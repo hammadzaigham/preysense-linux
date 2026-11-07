@@ -51,11 +51,7 @@ boundary asks for confirmation and restart. Linux does not provide Windows live
 Advanced Optimus switching. Battery charge limit, boot sound and USB power-off
 charging use bounded Acer controls. USB charging0 is displayed as Off.
 
-## Audio and overlay
-
-DTS:X Ultra uses the installed AcerUltraX daemon with model-specific tuning,
-profiles, equalizer and supported custom enhancements. Stereo Sound uses actual
-DTS engine settings. [Audio details](audio.md).
+## Overlay
 
 The native Qt overlay has eight paired CPU/GPU slots, optional graphs and fan
 RPM. Displayed RPM rounds to the nearest100. Missing values remain N/A. CPU/GPU voltage telemetry has been removed. RAM speed is the configured firmware transfer

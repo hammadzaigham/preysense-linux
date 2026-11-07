@@ -12,7 +12,6 @@ The Windows WPF projects remain the visual reference. Linux runtime code is in
 - `display.py`, `gpu_mode.py`: KDE display and reboot-dependent firmware GPU choices.
 - `hotkeys.py`, `power_events.py`: event-driven input and power-source notifications.
 - `lighting_effects.py`, `lighting_animation.py`, `lighting_ui.py`: hardware/software RGB.
-- `audio.py`, `audio_ui.py`: AcerUltraX integration.
 - `metrics_overlay.py`, `cpu_telemetry.py`, `nvml_telemetry.py`: demand-based metrics.
 - `memory_reader.py`: one-time configured RAM speed read in the hardware helper.
 

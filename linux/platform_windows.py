@@ -103,32 +103,10 @@ def build_platform_windows(window):
     s_layout.addWidget(row_theme)
     window._row_theme = row_theme
 
-    # E. DTS:X Ultra Sound Profile
-    row_dts = SettingDropdownRow("DTS:X Ultra Sound Profile", dropdown_width=220)
-    dts_profiles = [
-        ('Music', 'Music'),
-        ('Movie', 'Movie'),
-        ('Voice', 'Voice'),
-        ('Game - Immersive', 'Game1'),
-        ('Game - Competitive', 'Game2'),
-        ('Game - Entertainment', 'Game3'),
-        ('Off', 'Off'),
-    ]
-    for label, token in dts_profiles:
-        row_dts.addItem(label, token)
-
-    if hasattr(window, "apply"):
-        row_dts.currentIndexChanged.connect(
-            lambda index: window.apply('audio', {'action': 'set-profile', 'values': {'name': row_dts.combo.itemData(index)}})
-            if row_dts.combo.itemData(index) else None
-        )
-    s_layout.addWidget(row_dts)
-    window._row_dts = row_dts
-
     # Separator
     _separator(s_layout)
 
-    # F. Battery Limit (80% / 100%)
+    # E. Battery Limit (80% / 100%)
     bat_val = int(window.settings.value("battery_limit", 80)) if hasattr(window, "settings") else 80
     bat_limit_80 = bat_val == 80
     row_battery = SettingSwitchRow("Battery Limit", checked=bat_limit_80, on_text="80%", off_text="100%", width=92)
@@ -230,12 +208,3 @@ def update_platform_windows(window, data):
             window._row_usb.label_value.setText("Off" if val==0 else f"{val}%")
             window._row_usb.slider.blockSignals(False)
         except (ValueError, TypeError): pass
-
-    if hasattr(window, "_row_dts") and data.get("audio"):
-        audio_status = data["audio"].get("status") or {}
-        prof = audio_status.get("profile") or "Music"
-        idx = window._row_dts.combo.findData(prof)
-        if idx >= 0 and not window._row_dts.combo.hasFocus():
-            window._row_dts.combo.blockSignals(True)
-            window._row_dts.combo.setCurrentIndex(idx)
-            window._row_dts.combo.blockSignals(False)

@@ -39,7 +39,7 @@ class PlatformChromeTests(unittest.TestCase):
     def test_switch_sizes_and_remaining_settings_order(self):
         dialogs=build_platform_windows(self.owner)
         labels=[w.text() for w in dialogs['settings'].findChildren(QLabel)]
-        expected=['Run on Startup','Language','Theme','DTS:X Ultra Sound Profile','Battery Limit','USB Power-Off Charging']
+        expected=['Run on Startup','Language','Theme','Battery Limit','USB Power-Off Charging']
         self.assertEqual([label for label in labels if label in expected],expected)
         self.assertEqual(self.owner._row_startup.switch.size().toTuple(),(56,28))
         self.assertEqual(self.owner._row_theme.switch.size().toTuple(),(92,28))

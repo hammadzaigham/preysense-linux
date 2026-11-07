@@ -26,7 +26,6 @@ from power_ownership import PowerOwnership
 from factory_defaults import ObservedDefaults
 from mode_policies import fan_policy,power_policy,policies
 from hotkeys import Hotkeys,next_mode
-from audio import Audio
 from lighting_animation import LightingAnimation
 from lighting_effects import SOFTWARE_EFFECTS
 from lighting_settings import startup_lighting
@@ -50,9 +49,6 @@ class Worker(QObject):
         self.shutting_down=False
         self.animator=LightingAnimation(self)
 
-        self.audio=Audio()
-        self.audio_data=None
-        self.last_audio_poll=0
         self.curve = None
         self.display = Display()
         self.cpu_power = CpuPower()
@@ -123,9 +119,6 @@ class Worker(QObject):
             data['telemetry_sample']=sensor_due and bool(cpu_req or gpu_req)
             if sensor_due:self.last_sensor_poll=now
             calibration_profile=data.get("profile")
-            if self.last_audio_poll==0:
-                self.audio_data=self.audio.snapshot();self.last_audio_poll=time.monotonic()
-            data['audio']=self.audio_data
 
             if self.animator.active:data['led_timeout']=str(self.animator.timeout)
             if gpu_req:data['gpu'] = self.hardware.gpu_snapshot(requested=gpu_req)
@@ -246,8 +239,6 @@ class Worker(QObject):
                 self.done.emit('GPU boot setting: '+message, '')
                 self.poll()
                 return
-            elif name=='audio':
-                self.audio.command(args['action'],args.get('values',{}));self.last_audio_poll=0
             elif name=='cycle_mode':
                 current=int(self.hardware.bridge_read('profile') or 1)
                 ac=any(self.hardware.read(p/'online')=='1' for p in (self.hardware.root/'class/power_supply').glob('*'))
@@ -509,7 +500,7 @@ class Window(QMainWindow):
         self.overlay.metrics_changed.connect(lambda req: self.command.emit('overlay_metrics', req))
         platform = QWidget(); p = QVBoxLayout(platform)
         self.gpu = QLabel(); self.gpu.setWordWrap(True); p.addWidget(self.gpu)
-        note = QLabel('Linux support\n\nPerformance modes, automatic/maximum fans, temperatures, fan RPM, battery limit and ENEK5130 keyboard effects use native Linux interfaces.\n\nSee Linux Documentation for feature status, Intel RAPL controls and DTS audio settings. No OpenCore or Windows driver is installed by this app.\n\nThe hardware bridge currently supports the Predator PHN16S-71 only.'); note.setWordWrap(True); p.addWidget(note)
+        note = QLabel('Linux support\n\nPerformance modes, automatic/maximum fans, temperatures, fan RPM, battery limit and ENEK5130 keyboard effects use native Linux interfaces.\n\nSee Linux Documentation for feature status and Intel RAPL controls. No OpenCore or Windows driver is installed by this app.\n\nThe hardware bridge currently supports the Predator PHN16S-71 only.'); note.setWordWrap(True); p.addWidget(note)
         self.platform_controls = {}
         for name,title,choices in [
             ('boot_sound','Boot sound',[('Off',0),('On',1)]),

@@ -7,7 +7,7 @@ LOGO_OPTIONS = [('Custom', 'Custom'), ('Predator Cyan', 'Predator'), ('Hellfire 
 from PySide6.QtCore import Qt,QTimer
 from PySide6.QtGui import QColor,QPainter,QPen
 from PySide6.QtWidgets import QWidget,QVBoxLayout,QHBoxLayout,QLabel,QComboBox,QSlider,QLineEdit,QScrollArea
-from audio_ui import AudioDialog,AudioSwitch,button,row
+from dialog_base import AudioDialog,AudioSwitch,button,row
 from controls import ColorWheel
 from hardware import EFFECTS
 from lighting_effects import SOFTWARE_EFFECTS

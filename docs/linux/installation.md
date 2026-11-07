@@ -2,16 +2,13 @@
 
 ## One-command Fedora setup
 
-Run `./linux/setup.sh` as the desktop user. `./linux/install.sh` also redirects to it for normal installation. It installs only missing required Fedora packages with weak dependencies disabled, builds/installs the hardware bridge and GUI, then sets up the per-user AcerUltraX DTS CLI/daemon. `./linux/setup.sh --check` lists missing dependencies without changes. Automatic dependencies currently support Fedora only; other distributions require equivalent Python/PySide6/QtDBus/QtSvg/QtNetwork, kernel headers, GCC/make/DKMS, KDE KScreen/KPackage, PipeWire/Pulse compatibility and WirePlumber packages.
-
-AcerUltraX0.1.4 downloads use the fixed official x86_64 archive and pinned SHA256; only CLI/daemon files are copied, no downloaded installer is executed. Existing tuning manifests are preserved; absent tuning runs `acerultrax-cli setup`, which imports the model files from Acer. Its service autostarts as the desktop user. No Rust compiler or separate AcerUltraX GUI is required. Audio setup must run in the user's normal session so its systemd user bus is available.
-
+Run `./linux/setup.sh` as the desktop user. `./linux/install.sh` also redirects to it for normal installation. It installs only missing required Fedora packages with weak dependencies disabled, and builds/installs the hardware bridge and GUI. `./linux/setup.sh --check` lists missing dependencies without changes. Automatic dependencies currently support Fedora only; other distributions require equivalent Python/PySide6/QtDBus/QtSvg/QtNetwork, kernel headers, GCC/make/DKMS, and KDE KScreen/KPackage packages.
 
 NVIDIA driver installation/signing remains separate: the setup does not replace a running display driver, reboot, alter EFI partitions, or disable Secure Boot. A new machine with no enrolled signing key still requires the firmware's normal certificate-enrollment process.
 
 ## Packaging choice
 
-The current installed layout—GUI under `/opt/preysense`, menu launcher and system/user services—is appropriate for this hardware-control app. A portable/AppImage GUI still needs a privileged host driver, permissions and audio service, so it cannot be truly self-contained. A Fedora RPM with declarative dependencies and DKMS/service hooks is now available; see [RPM installation and building](rpm.md).
+The current installed layout—GUI under `/opt/preysense`, menu launcher and system/user services—is appropriate for this hardware-control app. A portable/AppImage GUI still needs a privileged host driver and permissions, so it cannot be truly self-contained. A Fedora RPM with declarative dependencies and DKMS/service hooks is now available; see [RPM installation and building](rpm.md).
 
 ## Build and install
 
@@ -58,19 +55,7 @@ This stops/unloads the OEM bridge, restores automatic fan control when firmware
 accepts the request, removes app/service/launcher/rule files, revokes additional
 RAPL and boost write permissions, and removes the app's login entry. Source and
 user preferences remain. The keyboard hwdb entry is removed and the saved original Predator mappings are restored in the running kernel. The backup is captured before installation; this development install migrates the two baseline values observed before its first mapping change.
-The NVIDIA driver is a separate installation. AcerUltraX is independent and is
-not deleted by the PreySense uninstaller.
-
-## Remove / disable DTS processing
-
-```sh
-acerultrax-cli autostart off
-```
-
-This stops its user service and restores normal routing. The upstream tarball's
-`install.sh --uninstall` removes its user binaries/menu entry. Its settings and
-19 MB of model files are deliberately retained by that upstream uninstaller;
-remove those only when a complete reset is intended.
+The NVIDIA driver is a separate installation.
 
 ### Configured RAM speed
 

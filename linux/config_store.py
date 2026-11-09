@@ -430,6 +430,8 @@ class JsonSettings:
             return data['Tuning'].get('FactoryProchotOffsetLocked')
         if key == 'factory_tjmax':
             return data['Tuning'].get('FactoryTjMaxCelsius')
+        if key == 'gpu_base_watts':
+            return data['Tuning'].get('GpuBasePowerWatts')
         if key == 'gpu_policies':
             return json.dumps(self._export_gpu_policies())
         if key == 'auto_refresh':
@@ -517,6 +519,8 @@ class JsonSettings:
             data['Tuning']['FactoryProchotOffsetLocked'] = None if value in (None, '') else bool(value); return
         if key == 'factory_tjmax':
             data['Tuning']['FactoryTjMaxCelsius'] = None if value in (None, '') else int(value); return
+        if key == 'gpu_base_watts':
+            data['Tuning']['GpuBasePowerWatts'] = None if value in (None, '') else int(value); return
         if key == 'gpu_policies':
             self._import_gpu_policies(json.loads(value) if isinstance(value, str) else value); return
         if key == 'auto_refresh':

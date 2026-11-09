@@ -571,6 +571,26 @@ def finish_control_windows(window):
     def refresh_gpu_nominal():
         base=getattr(window,'_gpu_base_watts', None)
         if base is None:
+            # Query from settings / config_store or NVML
+            val = window.settings.value('gpu_base_watts', None) if hasattr(window, 'settings') else None
+            if val is not None:
+                try: base = int(val)
+                except (ValueError, TypeError): base = None
+            if base is None:
+                try:
+                    from nvml_telemetry import NvmlTelemetry
+                    nvml = NvmlTelemetry.get_instance()
+                    if nvml.available:
+                        m = nvml.read_metrics({'default_power_limit_w'})
+                        if m and m.get('default_power_limit_w'):
+                            base = int(round(float(m['default_power_limit_w'])))
+                            if hasattr(window, 'settings'):
+                                window.settings.setValue('gpu_base_watts', base)
+                except Exception:
+                    pass
+            if base is not None:
+                window._gpu_base_watts = base
+        if base is None:
             window.gpu_power_row.spin.blockSignals(True)
             window.gpu_power_row.spin.setValue(window.gpu_power_row.spin.minimum())
             window.gpu_power_row.spin.blockSignals(False)
@@ -579,6 +599,7 @@ def finish_control_windows(window):
     for slider in (window.gpu_ct_slider, window.gpu_db_slider):
         slider.valueChanged.connect(lambda *_: refresh_gpu_nominal())
     window.refresh_gpu_nominal=refresh_gpu_nominal
+    refresh_gpu_nominal()
     window.apply_gpu_switch.toggled.connect(lambda on: gpu_panel.setEnabled(on and gpu.available))
     gpu_panel.setEnabled(False)
     body_l.addWidget(gpu_wrap)

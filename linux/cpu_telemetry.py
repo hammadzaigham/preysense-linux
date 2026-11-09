@@ -1,15 +1,18 @@
-"""Read-only kernel CPU frequency and RAPL package-power samples.
+"""Read-only kernel CPU frequency, RAPL package power, and optional MSR VID.
 
-No MSR access, privilege escalation or energy-counter permission changes occur
-here. Frequency is the kernel's scaling frequency, not a measured effective clock.
+Frequency is the kernel's scaling frequency, not a measured effective clock.
 Power is an energy-counter delta; unavailable/unsafe samples return None.
+CPU VID uses IA32_PERF_STATUS (MSR 0x198) when /dev/cpu/*/msr is readable —
+requested core voltage, not measured motherboard Vcore. No privilege escalation.
 """
 import math,re,time
 from pathlib import Path
 
+MSR_IA32_PERF_STATUS = 0x198
+
 class CpuTelemetry:
-    def __init__(self,root=Path('/sys'),clock=time.monotonic,max_interval=5.0,max_power_w=1000.0,procroot=Path('/proc')):
-        self.root=Path(root);self.procroot=Path(procroot);self.clock=clock;self.previous=None
+    def __init__(self,root=Path('/sys'),clock=time.monotonic,max_interval=5.0,max_power_w=1000.0,procroot=Path('/proc'),msrroot=Path('/dev/cpu')):
+        self.root=Path(root);self.procroot=Path(procroot);self.msrroot=Path(msrroot);self.clock=clock;self.previous=None
         self.cpu_previous={};self.cpu_previous_time=None
         self._hybrid_signature=None;self._hybrid_groups=None
         self.max_interval=float(max_interval);self.max_power_w=float(max_power_w)
@@ -128,6 +131,40 @@ class CpuTelemetry:
         if not math.isfinite(watts) or watts<=0 or watts>self.max_power_w:return None
         rounded=round(watts,2)
         return rounded if rounded>0 else None
+    @staticmethod
+    def decode_perf_status_vid(raw):
+        """Windows IntelCpuVoltage.DecodePerfStatus: IA32_PERF_STATUS[47:32] / 8192 V."""
+        try:raw=int(raw)
+        except (TypeError,ValueError):return None
+        volts=((raw>>32)&0xFFFF)/8192.0
+        return round(volts,3) if 0<volts<=2.5 else None
+    def core_voltage_vid(self):
+        """Requested core VID via platform sysfs (preferred) or /dev/cpu/*/msr."""
+        # Signed driver exposes millivolts without CAP_SYS_RAWIO.
+        for path in (
+            self.root/'devices/platform/preysense/cpu_vid_mv',
+            self.root/'devices/platform/preysense.0/cpu_vid_mv',
+        ):
+            try:
+                mv=int(path.read_text().strip())
+            except (OSError,ValueError):
+                continue
+            if 0<mv<=2500:
+                return round(mv/1000.0,3)
+        online=self.online_cpus()
+        candidates=sorted(online) if online else [0]
+        for index in candidates:
+            path=self.msrroot/str(index)/'msr'
+            try:
+                with path.open('rb') as handle:
+                    handle.seek(MSR_IA32_PERF_STATUS)
+                    blob=handle.read(8)
+                if len(blob)!=8:continue
+                value=self.decode_perf_status_vid(int.from_bytes(blob,'little'))
+                if value is not None:return value
+            except OSError:
+                continue
+        return None
     def snapshot(self,requested=None):
         """None preserves full sampling; an empty set performs no sensor reads."""
         req=set(requested) if requested is not None else None
@@ -148,7 +185,8 @@ class CpuTelemetry:
                   cpu_p_core_mhz=group_mean(frequencies,pcores),cpu_e_core_mhz=group_mean(frequencies,ecores),
                   cpu_max_core_usage=max(usage.values()) if usage else None,
                   cpu_p_core_usage=group_mean(usage,pcores),cpu_e_core_usage=group_mean(usage,ecores),
-                  memory_used_gb=self.memory_used_gb() if wants('memory_used_gb') else None)
+                  memory_used_gb=self.memory_used_gb() if wants('memory_used_gb') else None,
+                  cpu_voltage_v=self.core_voltage_vid() if wants('cpu_voltage_v') else None)
         if req is not None:
             for key in data:
                 if key not in req:data[key]=None

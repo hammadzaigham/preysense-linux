@@ -11,7 +11,7 @@ def confirm_calibration(parent):
     root=QVBoxLayout(dialog);root.setContentsMargins(0,0,0,0);root.setSpacing(0)
     root.addWidget(WindowTitleBar(dialog,title='Factory Calibration',on_close=dialog.reject))
     content=QVBoxLayout();content.setContentsMargins(14,10,14,8)
-    message=QLabel('Factory calibration is required before PreySense can continue. Capture the missing factory profiles now. Saved defaults will be preserved.')
+    message=QLabel('PreySense needs to capture factory power limits for each mode before tuning can continue. Already-saved modes are kept. Plug in AC power, then start calibration.')
     message.setWordWrap(True);message.setStyleSheet('font-size:15px;font-weight:400;');content.addWidget(message)
     root.addLayout(content)
     panel=QFrame();panel.setObjectName('calibrationFooter')
@@ -38,7 +38,7 @@ def run_calibration(parent):
     finished=[False];success=[False]
     def complete(error):
         finished[0]=True;success[0]=not error
-        message.setText(('Calibration failed: '+error) if error else 'Factory defaults saved.')
+        message.setText(('Could not finish calibration: '+error) if error else 'Factory defaults saved.')
         done_btn.setVisible(True);done_btn.setEnabled(True);header.close_button.setEnabled(True)
     def close():
         if finished[0]:dialog.accept()

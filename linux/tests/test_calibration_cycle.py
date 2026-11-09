@@ -49,14 +49,14 @@ class CycleTests(unittest.TestCase):
         self.assertTrue(self.cal.needs_calibration());self.cycle.start()
         self.assertEqual(self.cycle.timer.interval(),150)
         self.cycle.timer.stop();self.cycle._step()
-        self.assertEqual(self.cycle.timer.interval(),2500)
+        self.assertEqual(self.cycle.timer.interval(),2000)
         self.drive()
         self.assertEqual(self.hw.writes,[('profile',6),('profile',0),('profile',1),('profile',4),('profile',5),('profile',1)])
         self.assertEqual(self.errors,['']);self.assertFalse(self.cycle.active);self.assertEqual(self.hw.mode,1)
         self.assertFalse(self.cal.needs_calibration())
         profiles=self.cal.cache
-        self.assertEqual(profiles['Turbo']['pl1'],85)
-        self.assertEqual(profiles['Turbo']['pl2'],140)
+        self.assertEqual(profiles['Turbo']['CpuPl1Watts'],85)
+        self.assertEqual(profiles['Turbo']['CpuPl2Watts'],140)
     def test_existing_modes_and_values_never_replaced(self):
         self.seed(6);before=self.cal.cache['Eco'].copy()
         self.cycle.start();self.drive()

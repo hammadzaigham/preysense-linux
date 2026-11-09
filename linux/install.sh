@@ -21,7 +21,7 @@ install -D -m 644 "$src/kwin/preysense-instant/metadata.json" /opt/preysense/lin
 install -D -m 644 "$src/kwin/preysense-instant/contents/code/main.js" /opt/preysense/linux/kwin/preysense-instant/contents/code/main.js
 install -d /opt/preysense/docs/linux
 install -m 644 "$src/../docs/linux/"*.md /opt/preysense/docs/linux/
-install -m 644 "$src/README.md" "$src/REMAINING.md" /opt/preysense/linux/
+install -m 644 "$src/README.md" /opt/preysense/linux/
 install -m 644 "$src/assets/"*.svg "$src/assets/"*.json /opt/preysense/linux/assets/
 install -m 644 "$src/kernel/COPYING" /opt/preysense/licenses/GPL-2.0
 install -m 644 "$src/../LICENSE" /opt/preysense/licenses/MIT

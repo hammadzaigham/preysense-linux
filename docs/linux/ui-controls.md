@@ -4,12 +4,12 @@ The lighting wheel keeps the original hue/saturation disk, white center and outl
 selected color marker. Its cache follows display scaling. Arrow keys adjust hue or
 saturation when focused.
 
-The fan graph keeps fixed temperature positions, the original small unselected
-points and larger highlighted point, subdued grid and blue curve. Clicking a
-point selects it without changing duty. Dragging adjusts duty relative to its
-starting position, vertically, with a small drag threshold. Adjacent points bound
-the duty to preserve a monotonic curve. Blank graph clicks do not change duty.
-Left/right selects a point; up/down changes duty by one percent.
+The fan graph matches the Windows stage editor: X is each stage's entry °C
+(40–100), Y is duty %, with a lead-in floor and step curve. Clicking a point
+selects it without changing values. Dragging edits duty (and temperature when
+clearly horizontal). Adjacent points keep duties nondecreasing and temperatures
+unique. Blank graph clicks do not change values. Left/right selects a point;
+up/down changes duty by one percent. Temp / Duty / RPM rows mirror Windows.
 
 Mocked Qt tests exercise wheel selection, actual-point hit testing, relative drag,
 monotonic bounds and keyboard edits without writing fan or lighting hardware.

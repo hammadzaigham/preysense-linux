@@ -118,6 +118,11 @@ class NvmlTelemetry:
                 if self.lib.nvmlDeviceGetPowerManagementLimitConstraints(self.dev, ctypes.byref(min_limit), ctypes.byref(max_limit)) == 0:
                     data['max_power_limit_w'] = round(max_limit.value / 1000.0, 1)
 
+            if wants('enforced_power_limit_w') and hasattr(self.lib, 'nvmlDeviceGetEnforcedPowerLimit'):
+                enforced = ctypes.c_uint()
+                if self.lib.nvmlDeviceGetEnforcedPowerLimit(self.dev, ctypes.byref(enforced)) == 0:
+                    data['enforced_power_limit_w'] = round(enforced.value / 1000.0, 1)
+
             return data
         except Exception:
             return None

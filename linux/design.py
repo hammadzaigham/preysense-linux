@@ -118,7 +118,7 @@ def build(window):
     window.setCentralWidget(root);window.setFixedWidth(500);window.setMinimumHeight(0);window.adjustSize()
     window.setWindowTitle('PreySense')
     window.setWindowFlags(window.windowFlags()|Qt.FramelessWindowHint|Qt.NoDropShadowWindowHint)
-    window.overlay_dialog=QDialog(window);window.overlay_dialog.setWindowTitle('PreySense • Metrics');window.overlay_dialog.resize(540,380)
+    window.overlay_dialog=QDialog(window);window.overlay_dialog.setWindowTitle('PreySense • Overlay');window.overlay_dialog.resize(540,380)
     ol=QVBoxLayout(window.overlay_dialog)
     from metrics_overlay import controls as overlay_controls
     overlay_controls(window,ol)
@@ -255,9 +255,13 @@ QTableWidget { border:1px solid #373737; gridline-color:#373737; }
 
 def finish_control_windows(window):
     """Retain the original Lighting wheel and Fans graph rather than a generic form."""
-    from PySide6.QtWidgets import QCheckBox,QLineEdit,QSlider,QStackedWidget,QSpinBox
+    from PySide6.QtWidgets import QCheckBox,QLineEdit,QSlider
     from controls import ColorWheel,FanGraph
-    from fan_curve import DEFAULT_DUTIES,TEMPERATURES,default_curve
+    from fan_curve import (
+        default_stages, build_graph, apply_entry_temperatures, set_stage_duty,
+        duty_to_rpm, duty_bounds, temperature_bounds, CPU_MAX_RPM, GPU_MAX_RPM,
+    )
+    from ui_controls import SettingValueRow, SettingSliderRow
     def dialog(name,width):
         old=window.dialogs[name];old.hide()
         d=QDialog(window);d.setWindowTitle('PreySense • '+('Advanced' if name=='System' else name));d.setFixedWidth(width);d.setWindowFlags(d.windowFlags()|Qt.FramelessWindowHint)
@@ -337,7 +341,7 @@ def finish_control_windows(window):
     lighting.adjustSize()
     # Keep a reference for telemetry to update the timeout without changing user edits.
     window.original_timeout=timeout;window.original_timeout_initialized=False
-    fans,f=dialog('Fans',540)
+    fans,f=dialog('Fans',560)
     window.fan_profile=QComboBox()
     for name,value in MODES.items():window.fan_profile.addItem(name,value)
     window.fan_profile.setCurrentText('Balanced');window.fan_profile.setFixedWidth(140);labeled(f,'Profile Mode',window.fan_profile)
@@ -351,90 +355,248 @@ def finish_control_windows(window):
         button.clicked.connect(lambda checked=False,name=name:(window.set_fan_editor_kind(name),window.apply_fan_policy(True)))
     window.set_fan_editor_kind('Auto')
     channels=QHBoxLayout();cpu=action('CPU Fan','icons8-processor-32.png');gpu=action('GPU Fan','icons8-video-card-32.png');cpu.setCheckable(True);gpu.setCheckable(True);cpu.setChecked(True);channels.addWidget(cpu);channels.addWidget(gpu);f.addLayout(channels)
-    graphs=QStackedWidget();fan_graphs=[FanGraph(spins) for spins in window.curve_spins]
-    for graph in fan_graphs:
-        graph.setFixedHeight(300);graph.index=-1;graphs.addWidget(graph)
-    f.addWidget(graphs)
-    point=QSpinBox();point.setRange(0,100);point.setSingleStep(5);point.setSuffix(' %');point_label=QLabel('Selected Point');pointrow=QHBoxLayout();pointrow.addWidget(point_label);pointrow.addStretch();pointrow.addWidget(point);f.addLayout(pointrow)
-    def selected_point(index):
-        graph=fan_graphs[graphs.currentIndex()];graph.index=index
-        point.blockSignals(True)
-        point.setValue(graph.spins[index].value() if index>=0 else 0)
-        point.blockSignals(False)
-        point.setEnabled(window.fan_editor_kind=='Custom' and index>=0)
-        point_label.setText(f'{TEMPERATURES[index]}°C' if index>=0 else 'Selected Point')
-    def choose_channel(index):
-        graphs.setCurrentIndex(index);cpu.setChecked(index==0);gpu.setChecked(index==1);selected_point(fan_graphs[index].index)
-    cpu.clicked.connect(lambda:choose_channel(0));gpu.clicked.connect(lambda:choose_channel(1))
-    for graph in fan_graphs:
-        graph.selected.connect(selected_point);graph.changed.connect(lambda i,v:selected_point(i))
-    def commit_point(value):
-        graph=fan_graphs[graphs.currentIndex()];i=graph.index;low=graph.spins[i-1].value() if i else 0;high=graph.spins[i+1].value() if i+1<len(graph.spins) else 100
-        if i<0:return
-        value=max(low,min(high,value));graph.spins[i].setValue(value);selected_point(i);graph.update()
-    point.valueChanged.connect(commit_point);selected_point(-1)
-    delay_label=QLabel(f'{window.curve_delay.value():g} s');labeled(f,'Fan Control Delay',delay_label)
-    delay=QSlider(Qt.Horizontal);delay.setRange(0,5);delay.setValue(int(window.curve_delay.value()));delay.valueChanged.connect(lambda v:(window.curve_delay.setValue(v),delay_label.setText(f'{v} s')));window.curve_delay.valueChanged.connect(lambda v:delay.setValue(int(v)));f.addWidget(delay)
+    editor=QWidget();editor_layout=QVBoxLayout(editor);editor_layout.setContentsMargins(0,0,0,0);editor_layout.setSpacing(8)
+    delay_row=SettingSliderRow('Fan Control Delay',0,5,int(window.curve_delay.value()),unit=' s')
+    delay_row.slider.setTickInterval(1);delay_row.valueChanged.connect(lambda v:(window.curve_delay.setValue(v),delay_row.label_value.setText(f'{v} s')))
+    window.curve_delay.valueChanged.connect(lambda v:(delay_row.slider.blockSignals(True),delay_row.setValue(int(v)),delay_row.slider.blockSignals(False),delay_row.label_value.setText(f'{int(v)} s')))
+    delay_row.label_value.setText(f'{int(window.curve_delay.value())} s');editor_layout.addWidget(delay_row)
+    graph=FanGraph();graph.setFixedHeight(260);editor_layout.addWidget(graph)
+    row_temp=SettingValueRow('Temp',40,'°C',40,100);row_duty=SettingValueRow('Duty',0,'%',0,100);row_rpm=SettingValueRow('RPM',0,'RPM',0,6400)
+    editor_layout.addWidget(row_temp);editor_layout.addWidget(row_duty);editor_layout.addWidget(row_rpm)
+    f.addWidget(editor)
+    window._fan_visible_indices=[];window._fan_loading=False
+    def sync_stage_rows():
+        visible=graph.index;enabled=window.fan_editor_kind=='Custom' and visible>=0 and visible<len(window._fan_visible_indices)
+        for row in (row_temp,row_duty,row_rpm):row.setEnabled(enabled)
+        if not enabled:
+            row_temp.label.setText('Temp');row_duty.label.setText('Duty');row_rpm.label.setText('RPM');return
+        gpu=window.fan_channel_gpu;fan='GPU' if gpu else 'CPU'
+        row_temp.label.setText(f'{fan} Temp');row_duty.label.setText(f'{fan} Duty');row_rpm.label.setText(f'{fan} RPM')
+        stage_index=window._fan_visible_indices[visible]
+        stage=window.fan_stages[stage_index]
+        duty=stage['GpuDutyPercent' if gpu else 'CpuDutyPercent']
+        max_rpm=GPU_MAX_RPM if gpu else CPU_MAX_RPM
+        low_d,high_d=duty_bounds(graph.values,visible);low_t,high_t=temperature_bounds(graph.temperatures,visible)
+        window._fan_loading=True
+        row_temp.spin.setRange(low_t,high_t);row_duty.spin.setRange(low_d,high_d);row_rpm.spin.setRange(0,max_rpm)
+        row_temp.setValue(graph.temperatures[visible]);row_duty.setValue(duty);row_rpm.setValue(duty_to_rpm(duty,max_rpm))
+        window._fan_loading=False
+    def refresh_fan_graph(keep_selection=True):
+        previous=window._fan_visible_indices[graph.index] if keep_selection and 0<=graph.index<len(window._fan_visible_indices) else -1
+        indices,temps,duties,lead=build_graph(window.fan_stages,gpu=window.fan_channel_gpu)
+        window._fan_visible_indices=indices
+        graph.set_curve(temps,duties,lead)
+        if previous in indices:graph.index=indices.index(previous)
+        elif indices:graph.index=0
+        else:graph.index=-1
+        sync_stage_rows();graph.update()
+    window.refresh_fan_graph=refresh_fan_graph
+    def choose_channel(gpu_channel):
+        window.fan_channel_gpu=bool(gpu_channel);cpu.setChecked(not gpu_channel);gpu.setChecked(gpu_channel);refresh_fan_graph()
+    cpu.clicked.connect(lambda:choose_channel(False));gpu.clicked.connect(lambda:choose_channel(True))
+    def on_graph_selected(index):
+        graph.index=index;sync_stage_rows()
+    def on_graph_changed():
+        if window._fan_loading or window.fan_editor_kind!='Custom' or graph.index<0:return
+        visible=graph.index;stage_index=window._fan_visible_indices[visible]
+        window.fan_stages=apply_entry_temperatures(window.fan_stages,window._fan_visible_indices,graph.temperatures,window.fan_channel_gpu)
+        window.fan_stages=set_stage_duty(window.fan_stages,stage_index,graph.values[visible],window.fan_channel_gpu)
+        refresh_fan_graph()
+    graph.selected.connect(on_graph_selected);graph.changed.connect(on_graph_changed)
+    def commit_stage_field(sender):
+        if window._fan_loading or window.fan_editor_kind!='Custom' or graph.index<0:return
+        visible=graph.index;stage_index=window._fan_visible_indices[visible]
+        gpu_channel=window.fan_channel_gpu;max_rpm=GPU_MAX_RPM if gpu_channel else CPU_MAX_RPM
+        if sender is row_temp:
+            temps=list(graph.temperatures);temps[visible]=row_temp.value()
+            window.fan_stages=apply_entry_temperatures(window.fan_stages,window._fan_visible_indices,temps,gpu_channel)
+        elif sender is row_duty:
+            window.fan_stages=set_stage_duty(window.fan_stages,stage_index,row_duty.value(),gpu_channel)
+        else:
+            from fan_curve import rpm_to_duty
+            window.fan_stages=set_stage_duty(window.fan_stages,stage_index,rpm_to_duty(row_rpm.value(),max_rpm),gpu_channel)
+        refresh_fan_graph()
+    row_temp.valueChanged.connect(lambda *_:commit_stage_field(row_temp))
+    row_duty.valueChanged.connect(lambda *_:commit_stage_field(row_duty))
+    row_rpm.valueChanged.connect(lambda *_:commit_stage_field(row_rpm))
     footer=QHBoxLayout();reset=action('Reset');apply=window.curve_apply;apply.setText('Apply');apply.setMinimumHeight(34);save=action('Save')
     def reset_curve():
         try:mode=int(window.fan_profile.currentData())
         except (ValueError,TypeError):mode=1
-        for channel,spins in enumerate(window.curve_spins):
-            defaults=default_curve(mode,gpu=bool(channel))
-            for spin,value in zip(spins,defaults):spin.setValue(value)
-        selected_point(-1)
+        window.fan_stages=default_stages(mode);window.curve_delay.setValue(2);refresh_fan_graph(False)
     reset.clicked.connect(reset_curve)
     apply.clicked.disconnect();apply.clicked.connect(lambda:window.apply_fan_policy(False));save.clicked.connect(lambda:window.apply_fan_policy(True))
-    window.fan_profile.currentIndexChanged.connect(lambda:(window.load_fan_policy(),selected_point(-1)))
+    window.fan_profile.currentIndexChanged.connect(lambda:window.load_fan_policy())
     footer.addWidget(reset);footer.addWidget(apply);footer.addWidget(save);footer.setContentsMargins(14,10,14,16);footer.setSpacing(4);fan_footer=QWidget();fan_footer.setLayout(footer);fans.layout().addWidget(fan_footer)
     def fan_editor_state(kind,buttons=(reset,apply,save),panel=fan_footer):
         enabled=kind=='Custom'
-        for widget in (graphs,delay):widget.setEnabled(enabled)
-        point.setEnabled(enabled and fan_graphs[graphs.currentIndex()].index>=0)
-        panel.setVisible(enabled)
+        editor.setEnabled(enabled);panel.setVisible(enabled)
         for widget in buttons:widget.setVisible(enabled)
         from PySide6.QtWidgets import QGraphicsOpacityEffect
-        effect=graphs.graphicsEffect()
-        if effect is None:effect=QGraphicsOpacityEffect(graphs);graphs.setGraphicsEffect(effect)
+        effect=editor.graphicsEffect()
+        if effect is None:effect=QGraphicsOpacityEffect(editor);editor.setGraphicsEffect(effect)
         effect.setOpacity(1 if enabled else .45)
-        fans.adjustSize()
+        sync_stage_rows();fans.adjustSize()
     window.fan_editor_state=fan_editor_state
-    fan_editor_state(window.fan_editor_kind)
-    fans.adjustSize()
+    refresh_fan_graph(False);fan_editor_state(window.fan_editor_kind);fans.adjustSize()
 
+    # Match PreySense.Frontend/Views/ModeSettingsWindow.xaml structure.
+    from ui_controls import SettingSwitchRow, SettingSliderRow, SettingValueRow, SettingDropdownRow, RectangularSwitch
+    from gpu_offsets import GpuOffsets
+    from slider_snap import configure_snap
+    from PySide6.QtWidgets import QScrollArea, QFrame
     tuning,t=dialog('Tuning',500)
-    window.power_profile=QComboBox()
-    for name,value in MODES.items():window.power_profile.addItem(name,value)
-    window.power_profile.setCurrentText('Balanced');window.power_profile.setFixedWidth(140);labeled(t,'Profile Mode',window.power_profile)
+    t.setSpacing(8)
+
+    enable_row=SettingSwitchRow('Enable Tuning', checked=bool(window.settings.value('tuning_enabled', False, type=bool)))
+    window.tuning_enabled_row=enable_row
+    t.addWidget(enable_row)
+    sep=QFrame(); sep.setFrameShape(QFrame.HLine); sep.setObjectName('separator'); t.addWidget(sep)
+
+    prochot_block=QWidget(); prochot_l=QVBoxLayout(prochot_block); prochot_l.setContentsMargins(0,0,0,0); prochot_l.setSpacing(4)
+    prochot_labels=QHBoxLayout(); window.prochot_activation=QLabel('PROCHOT —'); window.tjmax_label=QLabel('Tj-Max —')
+    for lab in (window.prochot_activation, window.tjmax_label): lab.setObjectName('muted')
+    prochot_labels.addWidget(window.prochot_activation); prochot_labels.addStretch(); prochot_labels.addWidget(window.tjmax_label)
+    prochot_l.addLayout(prochot_labels)
+    prochot_row=QHBoxLayout(); window.prochot_offset=SettingValueRow('CPU PROCHOT Offset',0,'°C',0,63)
+    window.prochot_switch=RectangularSwitch()
+    saved_prochot=window.settings.value('prochot_offset', None)
+    if saved_prochot is not None:
+        try: window.prochot_offset.setValue(int(saved_prochot))
+        except (TypeError, ValueError): pass
+    window.prochot_switch.setChecked(bool(window.settings.value('apply_prochot', False, type=bool)))
+    prochot_row.addWidget(window.prochot_offset,1); prochot_row.addWidget(window.prochot_switch)
+    prochot_l.addLayout(prochot_row)
+    t.addWidget(prochot_block)
+    sep2=QFrame(); sep2.setFrameShape(QFrame.HLine); sep2.setObjectName('separator'); t.addWidget(sep2)
+
+    # Mode + scroll + footer gated by Enable Tuning (Windows Grid.Row 2).
+    gated=QWidget(); gated_l=QVBoxLayout(gated); gated_l.setContentsMargins(0,0,0,0); gated_l.setSpacing(8)
+    window.tuning_controls=gated
+
+    mode_row=SettingDropdownRow('Performance Mode', dropdown_width=140)
+    for name in ('Eco','Quiet','Balanced','Performance','Turbo'):
+        mode_row.addItem(name, MODES[name])
+    mode_row.setCurrentText('Balanced')
+    window.power_profile=mode_row.combo
     window.power_profile.currentIndexChanged.connect(window.load_power_policy)
     window.power_profile.activated.connect(lambda index:window.apply('profile',window.power_profile.itemData(index),immediate=True))
-    heading=QLabel('CPU Power Limits');heading.setObjectName('sectionTitle');t.addWidget(heading)
-    from ui_controls import SettingSwitchRow, SettingSliderRow
-    boost_row = SettingSwitchRow('CPU Boost', checked=True)
-    window.cpu_boost = boost_row.switch
-    boost_row.toggled.connect(lambda enabled:window.apply_boost_setting(enabled))
-    t.addWidget(boost_row)
-    for title,spin in [('Sustained Long Power [PL1]',window.power_pl1),('Burst Peak Power [PL2]',window.power_pl2)]:
-        spin.setFixedWidth(90);labeled(t,title,spin)
+    gated_l.addWidget(mode_row)
+
+    scroll=QScrollArea(); scroll.setWidgetResizable(True); scroll.setFrameShape(QFrame.NoFrame)
+    scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+    body=QWidget(); body_l=QVBoxLayout(body); body_l.setContentsMargins(0,0,0,0); body_l.setSpacing(8)
+    scroll.setWidget(body); scroll.setMinimumHeight(320); gated_l.addWidget(scroll)
+
+    # Linux only exposes on/off via intel_pstate no_turbo (not Windows PERFBOOSTMODE).
+    boost_row=SettingSwitchRow('CPU Boost', checked=True)
+    window.cpu_boost=boost_row
+    boost_row.toggled.connect(lambda on: window.apply_boost_setting(on))
+    body_l.addWidget(boost_row)
+
+    def section(title, icon_name):
+        head=QWidget(); hl=QHBoxLayout(head); hl.setContentsMargins(0,4,0,4)
+        icon_lab=QLabel(); icon_lab.setPixmap(icon(icon_name).pixmap(14,14)); hl.addWidget(icon_lab)
+        title_lab=QLabel(title); title_lab.setObjectName('sectionTitle'); hl.addWidget(title_lab); hl.addStretch()
+        sw=RectangularSwitch(); hl.addWidget(sw)
+        panel=QWidget(); pl=QVBoxLayout(panel); pl.setContentsMargins(0,0,0,0); pl.setSpacing(4)
+        wrap=QWidget(); wl=QVBoxLayout(wrap); wl.setContentsMargins(0,0,0,8); wl.setSpacing(0)
+        wl.addWidget(head); wl.addWidget(panel)
+        return wrap, panel, pl, sw
+
+    cpu_wrap, cpu_panel, cpu_l, window.apply_cpu_switch = section('CPU Power Limits','icons8-processor-32.png')
+    window.apply_cpu_switch.setChecked(False)
+    window.power_pl1.setRange(5,300); window.power_pl2.setRange(5,300)
+    pl1_row=SettingValueRow('Sustained Long Power [PL1]', window.power_pl1.value(), 'W', 5, 300)
+    pl2_row=SettingValueRow('Burst Peak Power [PL2]', window.power_pl2.value(), 'W', 5, 300)
+    pl1_row.valueChanged.connect(window.power_pl1.setValue); window.power_pl1.valueChanged.connect(pl1_row.setValue)
+    pl2_row.valueChanged.connect(window.power_pl2.setValue); window.power_pl2.valueChanged.connect(pl2_row.setValue)
+    window.power_pl1_row=pl1_row; window.power_pl2_row=pl2_row
+    cpu_l.addWidget(pl1_row); cpu_l.addWidget(pl2_row)
     window.power_tau=QComboBox()
-    for value in (0,1,2,4,8,16,32,56,64,128,256,449):window.power_tau.addItem('Off' if value==0 else '∞' if value==449 else f'{value} s',value)
+    tau_steps=(0,1,2,4,8,16,32,56,64,128,256,449)
+    for value in tau_steps: window.power_tau.addItem('Off' if value==0 else '∞' if value==449 else f'{value} s', value)
     window.power_tau.setCurrentIndex(window.power_tau.findData(56))
-    tau_slider = SettingSliderRow('Burst Window [Tau]', 0, 11, 7, unit='')
-    window.tau_slider = tau_slider
-    tau_steps = [0,1,2,4,8,16,32,56,64,128,256,449]
+    tau_slider=SettingSliderRow('Turbo Time Limit [Tau]', 0, 11, max(0, window.power_tau.currentIndex()), unit='')
+    window.tau_slider=tau_slider
     def on_tau_slide(idx):
         if 0 <= idx < len(tau_steps):
-            val = tau_steps[idx]
+            val=tau_steps[idx]
             tau_slider.label_value.setText('Off' if val==0 else '∞' if val==449 else f'{val} s')
             window.power_tau.setCurrentIndex(idx)
-    tau_slider.valueChanged.connect(on_tau_slide)
-    on_tau_slide(tau_slider.value())
-    t.addWidget(tau_slider)
-    window.power_apply.setText('Apply');window.power_apply.setMinimumHeight(34);window.power_apply.clicked.disconnect();window.power_apply.clicked.connect(lambda:window.apply_power_policy(False))
-    footer=QHBoxLayout();reset=action('Reset');reset.clicked.connect(window.reset_power_policy);footer.addWidget(reset);footer.addWidget(window.power_apply);save=action('Save');window.power_save=save;save.clicked.connect(lambda:window.apply_power_policy(True));footer.addWidget(save);footer.setContentsMargins(14,10,14,16);footer.setSpacing(4);tuning_footer=QWidget();tuning_footer.setLayout(footer);tuning.layout().addWidget(tuning_footer);tuning.adjustSize()
+    tau_slider.valueChanged.connect(on_tau_slide); on_tau_slide(tau_slider.value())
+    cpu_l.addWidget(tau_slider)
+    window.apply_cpu_switch.toggled.connect(lambda on: cpu_panel.setEnabled(on))
+    cpu_panel.setEnabled(False)
+    body_l.addWidget(cpu_wrap)
+
+    gpu=GpuOffsets(); window.gpu_offsets_available=gpu.available
+    gpu_wrap, gpu_panel, gpu_l, window.apply_gpu_switch = section('GPU Power Limits','icons8-video-card-32.png')
+    window.apply_gpu_switch.setChecked(False); window.apply_gpu_switch.setEnabled(gpu.available)
+    window.gpu_power_row=SettingValueRow('Power Limit', 0, 'W', 0, 400)
+    window.gpu_power_row.setEnabled(False)
+    window.gpu_power_row.spin.setSpecialValueText('N/A')
+    gpu_l.addWidget(window.gpu_power_row)
+    window.gpu_ct_slider=SettingSliderRow('Delta', 0, 100, 0, unit=' W')
+    window.gpu_db_slider=SettingSliderRow('Dynamic Boost', 0, 25, 0, unit=' W')
+    window.gpu_cp_slider=SettingSliderRow('Platform Power Limit Offset', 0, 100, 0, unit=' W')
+    for slider in (window.gpu_ct_slider, window.gpu_db_slider, window.gpu_cp_slider):
+        configure_snap(slider.slider, 5)
+        gpu_l.addWidget(slider)
+    class _SliderValue:
+        def __init__(self, row): self._row=row
+        def value(self): return int(self._row.value())
+        def setValue(self, v):
+            self._row.slider.blockSignals(True); self._row.setValue(int(v)); self._row.slider.blockSignals(False)
+            self._row.label_value.setText(f'{int(v)}{self._row._unit}')
+        def setEnabled(self, enabled): self._row.setEnabled(enabled)
+    window.gpu_ct=_SliderValue(window.gpu_ct_slider)
+    window.gpu_db=_SliderValue(window.gpu_db_slider)
+    window.gpu_cp=_SliderValue(window.gpu_cp_slider)
+    def refresh_gpu_nominal():
+        base=getattr(window,'_gpu_base_watts', None)
+        if base is None:
+            window.gpu_power_row.spin.blockSignals(True)
+            window.gpu_power_row.spin.setValue(window.gpu_power_row.spin.minimum())
+            window.gpu_power_row.spin.blockSignals(False)
+            return
+        window.gpu_power_row.setValue(int(base)+window.gpu_ct.value()+window.gpu_db.value())
+    for slider in (window.gpu_ct_slider, window.gpu_db_slider):
+        slider.valueChanged.connect(lambda *_: refresh_gpu_nominal())
+    window.refresh_gpu_nominal=refresh_gpu_nominal
+    window.apply_gpu_switch.toggled.connect(lambda on: gpu_panel.setEnabled(on and gpu.available))
+    gpu_panel.setEnabled(False)
+    body_l.addWidget(gpu_wrap)
+    body_l.addStretch()
+
+    window.power_apply.setText('Apply'); window.power_apply.setMinimumHeight(34)
+    try: window.power_apply.clicked.disconnect()
+    except TypeError: pass
+    window.power_apply.clicked.connect(lambda: window.apply_power_policy(False))
+    footer=QHBoxLayout(); reset=action('Reset'); reset.clicked.connect(window.reset_power_policy)
+    footer.addWidget(reset); footer.addWidget(window.power_apply)
+    save=action('Save'); window.power_save=save; save.clicked.connect(lambda: window.apply_power_policy(True))
+    footer.addWidget(save); footer.setContentsMargins(0,8,0,0); footer.setSpacing(4)
+    tuning_footer=QWidget(); tuning_footer.setLayout(footer); gated_l.addWidget(tuning_footer)
+    t.addWidget(gated)
+
+    def set_tuning_enabled(enabled):
+        window.settings.setValue('tuning_enabled', bool(enabled))
+        prochot_block.setEnabled(enabled)
+        gated.setEnabled(enabled)
+        if enabled:
+            gpu_wrap.setEnabled(gpu.available)
+            gpu_panel.setEnabled(gpu.available and window.apply_gpu_switch.isChecked())
+            cpu_panel.setEnabled(window.apply_cpu_switch.isChecked())
+            if hasattr(window, 'refresh_prochot_ui'):
+                window.refresh_prochot_ui()
+    enable_row.toggled.connect(set_tuning_enabled)
+    set_tuning_enabled(enable_row.isChecked())
+
+    tuning.adjustSize()
     def sync_tuning_on_show(event):
-        try:current=int(getattr(window,'_confirmed_profile',None) or 1)
-        except (ValueError,TypeError):current=1
+        try: current=int(getattr(window,'_confirmed_profile',None) or 1)
+        except (ValueError,TypeError): current=1
         if window.power_profile.currentData()!=current:
             idx=window.power_profile.findData(current)
             if idx>=0:
@@ -442,9 +604,13 @@ def finish_control_windows(window):
                 window.power_profile.setCurrentIndex(idx)
                 window.power_profile.blockSignals(False)
                 window.load_power_policy()
+        if hasattr(window, 'refresh_prochot_ui'):
+            window.refresh_prochot_ui()
         QDialog.showEvent(tuning,event)
     tuning.showEvent=sync_tuning_on_show
     window.profile_editors_initialized=False
+    if hasattr(window, 'refresh_prochot_ui'):
+        window.refresh_prochot_ui()
 
     from documentation_ui import DocumentationWindow
     window.documentation=DocumentationWindow(window)

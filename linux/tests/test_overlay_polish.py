@@ -26,14 +26,14 @@ class OverlayPolishTests(unittest.TestCase):
             settings = QSettings(str(Path(directory)/'prefs'), QSettings.IniFormat)
             h = HardwareOverlay(settings)
             self.assertEqual(tuple(h.columns), DEFAULT_COLUMNS)
-            self.assertEqual(h.column_graphs, [False]*4+[True]+[False]*3)
+            self.assertEqual(h.column_graphs, [False, False, False, False, True, False, False])
             original_width = h._measure_layout(2)['width']
-            h.set_column(7, 'Fan Speed', 'None', True)
+            self.assertTrue(h.add_slot('Fan Speed', 'None', True))
             self.assertGreater(h._measure_layout(2)['width'], original_width)
             restored = HardwareOverlay(settings)
-            self.assertEqual(restored.columns[7], ('Fan Speed', 'None'))
-            self.assertTrue(restored.column_graphs[7])
-            self.assertEqual(column_text({'cpu_frequency_mhz': 4500}, 'P-Core'), 'N/A')
+            self.assertEqual(restored.columns[-1], ('Fan Speed', 'None'))
+            self.assertTrue(restored.column_graphs[-1])
+            self.assertEqual(column_text({'cpu_p_core_mhz': 4500}, 'Effective Clock'), '4500MHz')
             self.assertEqual(column_text({'memory': 55}, 'Memory'), 'N/A')
             self.assertEqual(column_text({'cpu_fan': 0}, 'Fan Speed'), '0RPM')
             restored.close(); h.close()
@@ -41,8 +41,9 @@ class OverlayPolishTests(unittest.TestCase):
     def test_populated_graph_render_and_text_opacity(self):
         with tempfile.TemporaryDirectory() as directory:
             h = HardwareOverlay(QSettings(str(Path(directory)/'prefs'), QSettings.IniFormat))
-            for index in range(8): h.set_column(index, 'None', 'None', False)
-            h.set_column(0, 'Usage', 'Usage', True)
+            while h.columns:
+                h.remove_slot(0)
+            h.add_slot('Usage', 'Usage', True)
             h.show()
             for i in range(60):
                 h.update_data({'cpu_usage': i, 'gpu': {'usage': 100-i}})

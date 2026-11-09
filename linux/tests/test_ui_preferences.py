@@ -31,9 +31,10 @@ class UiPreferencesTests(unittest.TestCase):
  def test_tooltip_changes_are_cleared(self):
   install_no_tooltips(self.app);widget=QWidget();widget.setToolTip('hidden');self.assertEqual(widget.toolTip(),'');widget.close()
  def test_fan_graph_left_edge_is_40_degrees(self):
-  spins=[QSpinBox() for _ in range(14)];graph=FanGraph(spins)
-  self.assertEqual(graph.point(1,50).x(),graph.plot().left())
-  self.assertLess(graph.point(0,50).x(),graph.plot().left());graph.close()
+  from fan_curve import GRAPH_MIN_C
+  graph=FanGraph();graph.set_curve([GRAPH_MIN_C,50,60],[10,20,30],0)
+  self.assertEqual(graph.point(0,50).x(),graph.plot().left())
+  self.assertGreater(graph.point(1,50).x(),graph.plot().left());graph.close()
  def test_light_pressed_thumb_keeps_color(self):
   self.owner.appearance=Appearance(self.owner);self.owner.appearance.set_theme('Light',False)
   self.assertIn('background:#8B97AF',self.app.styleSheet())

@@ -1,83 +1,96 @@
 import sys
 import unittest
 from pathlib import Path
-sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
-from fan_curve import FanCurve, DEFAULT_DUTIES, interpolate
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from fan_curve import (
+    FanCurve, FanCurveFollower, default_stages, rpm_to_duty, CPU_MAX_RPM,
+    compact_stages, build_graph,
+)
+class FollowerTests(unittest.TestCase):
+    def balanced(self):
+        return default_stages(1)
 
-class FanCurveTests(unittest.TestCase):
-    def test_reject_decreasing_curve(self):
-        with self.assertRaises(ValueError): FanCurve([50,0]+[100]*12,DEFAULT_DUTIES)
-    def test_follows_curve_values(self):
-        c=FanCurve(DEFAULT_DUTIES,DEFAULT_DUTIES,5)
-        c.target(40,0)
-        c.target(100,1)
-        self.assertEqual(c.target(100,6),(100,100))
-    def test_symmetric_delay(self):
-        c=FanCurve(DEFAULT_DUTIES,DEFAULT_DUTIES,2)
-        initial=c.target(40,0)
-        self.assertEqual(c.target(60,1),initial)
-        raised=c.target(60,3)
-        self.assertGreater(raised[0],initial[0])
-        self.assertEqual(c.target(40,4),raised)
-        self.assertEqual(c.target(40,6),initial)
-    def test_interpolation_and_clamps(self):
-        self.assertEqual(interpolate(0,DEFAULT_DUTIES),20)
-        self.assertEqual(interpolate(120,DEFAULT_DUTIES),100)
-        self.assertEqual(interpolate(47.5,DEFAULT_DUTIES),25)
-    def test_invalid_sensor_value(self):
-        for temp in (float('nan'),float('inf')):
-            with self.assertRaises(ValueError): interpolate(temp,DEFAULT_DUTIES)
+    def test_stage_zero_stays_stopped_until_rise_trip(self):
+        follower = FanCurveFollower()
+        stages = self.balanced()
+        cpu, gpu, stage = follower.evaluate(40, 40, stages, 0, 0)
+        self.assertEqual(stage, 0)
+        self.assertEqual(cpu, 0)
+        self.assertEqual(gpu, 0)
+        cpu, gpu, stage = follower.evaluate(56, 40, stages, 0, 1000)
+        self.assertEqual(stage, 1)
+        shared = max(rpm_to_duty(1800, CPU_MAX_RPM), rpm_to_duty(1850, CPU_MAX_RPM))
+        self.assertEqual(cpu, shared)
+        self.assertEqual(gpu, shared)
 
-class WindowsFollowerTests(unittest.TestCase):
-    def curve(self, delay=0):
-        # Hidden legacy 35°C point followed by the Windows 40–100°C points.
-        values=(20,20,20,25,30,40,50,60,70,80,90,100,100,100)
-        return FanCurve(values,values,delay)
+    def test_gpu_rise_alone_advances_stage(self):
+        follower = FanCurveFollower()
+        _, _, stage = follower.evaluate(40, 50, self.balanced(), 0, 0)
+        self.assertEqual(stage, 1)
 
-    def test_cooling_hysteresis(self):
-        c=self.curve()
-        for t,want in ((59,30),(60,40),(59,40),(56,40),(55,30)):
-            self.assertEqual(c.target(t,0),(want,want))
+    def test_retreat_requires_both_sensors_clear(self):
+        follower = FanCurveFollower()
+        stages = self.balanced()
+        follower.evaluate(65, 56, stages, 0, 0)
+        _, _, stage = follower.evaluate(65, 56, stages, 0, 1000)
+        self.assertEqual(stage, 2)
+        _, _, stage = follower.evaluate(50, 56, stages, 0, 2000)
+        self.assertEqual(stage, 2)
+        _, _, stage = follower.evaluate(60, 52, stages, 0, 3000)
+        self.assertEqual(stage, 1)
+        _, _, stage = follower.evaluate(40, 40, stages, 0, 4000)
+        self.assertEqual(stage, 0)
 
-    def test_same_direction_keeps_clock_and_latest_target(self):
-        for temperatures, expected in (((60,65,70,75),(40,40,40,70)),
-                                        ((75,70,65,60),(70,70,70,40))):
-            c=self.curve(2)
-            for now,(t,want) in enumerate(zip(temperatures,expected)):
-                self.assertEqual(c.target(t,now),(want,want))
+    def test_shared_delay_holds_stage_change(self):
+        follower = FanCurveFollower()
+        stages = self.balanced()
+        follower.evaluate(40, 40, stages, delay_seconds=2, now_ms=0)
+        _, _, stage = follower.evaluate(56, 40, stages, delay_seconds=2, now_ms=500)
+        self.assertEqual(stage, 0)
+        _, _, stage = follower.evaluate(56, 40, stages, delay_seconds=2, now_ms=2499)
+        self.assertEqual(stage, 0)
+        _, _, stage = follower.evaluate(56, 40, stages, delay_seconds=2, now_ms=2500)
+        self.assertEqual(stage, 1)
 
-    def test_return_to_applied_cancels_pending(self):
-        c=self.curve(5)
-        for now,t,want in ((0,70,60),(1,65,60),(4,70,60),(5,65,60),(9,65,60),(10,65,50)):
-            self.assertEqual(c.target(t,now),(want,want))
+    def test_disabled_trip_does_not_advance_on_that_sensor(self):
+        follower = FanCurveFollower()
+        quiet = default_stages(0)
+        follower.evaluate(90, 75, quiet, 0, 0)
+        _, _, stage = follower.evaluate(100, 75, quiet, 0, 1000)
+        self.assertLessEqual(stage, 5)
+        _, _, stage = follower.evaluate(100, 80, quiet, 0, 2000)
+        self.assertEqual(stage, 6)
 
-    def test_whole_percent_targets_and_shared_clock(self):
-        cpu=(20,20,37)+(100,)*11
-        gpu=(20,20,20,40)+(100,)*10
-        c=FanCurve(cpu,gpu,2)
-        self.assertEqual(c.target(40,0),(20,20))
-        self.assertEqual(c.target(45,1),(20,20))
-        self.assertEqual(c.target(50,2),(20,20))
-        self.assertEqual(c.target(50,3),(100,40))
-        self.assertEqual(c.target(50,4),(100,40))
-        c=FanCurve(cpu,gpu,0)
-        self.assertEqual(c.target(49,0),(37,20))
+    def test_quiet_and_eco_share_defaults(self):
+        self.assertEqual(
+            [s['CpuTargetRpm'] for s in default_stages(0)],
+            [s['CpuTargetRpm'] for s in default_stages(6)],
+        )
 
-    def test_shared_cooling_clock_when_second_fan_changes_later(self):
-        cpu=(20,20,37)+(100,)*11
-        gpu=(20,20,20,40)+(100,)*10
-        c=FanCurve(cpu,gpu,2)
-        self.assertEqual(c.target(50,0),(100,40))
-        self.assertEqual(c.target(45,1),(100,40))
-        self.assertEqual(c.target(40,2),(100,40))
-        self.assertEqual(c.target(40,3),(20,20))
+    def test_both_fans_use_max_duty(self):
+        curve = FanCurve(stages=self.balanced(), delay=0)
+        duty = curve.target(cpu_temp=56, gpu_temp=40, now=0)
+        self.assertEqual(duty[0], duty[1])
 
-    def test_no_emergency_override(self):
-        c=FanCurve((37,)*14,(43,)*14,0)
-        self.assertEqual(c.target(100,0),(37,43))
+    def test_policy_round_trip_stages(self):
+        from mode_policies import fan_policy
+        policy = fan_policy({'kind': 'Custom', 'delay': 2, 'stages': compact_stages(default_stages(1))})
+        self.assertEqual(policy['kind'], 'Custom')
+        self.assertTrue(policy['stages'])
+        self.assertIn('CpuTempC', policy['stages'][0])
 
-    def test_default_delay_and_new_profile_reset(self):
-        self.assertEqual(FanCurve(DEFAULT_DUTIES,DEFAULT_DUTIES).delay,2)
-        self.assertEqual(self.curve(5).target(75,0),(70,70))
+    def test_custom_policy_requires_stages(self):
+        from mode_policies import fan_policy
+        with self.assertRaises(ValueError):
+            fan_policy({'kind': 'Custom', 'delay': 1})
 
-if __name__=='__main__': unittest.main()
+    def test_build_graph_uses_entry_temps(self):
+        indices, temps, duties, lead = build_graph(default_stages(1), gpu=False)
+        self.assertTrue(indices)
+        self.assertEqual(temps[0], 56)
+        self.assertEqual(lead, 0)
+        self.assertEqual(len(temps), len(duties))
+
+
+if __name__ == '__main__':
+    unittest.main()

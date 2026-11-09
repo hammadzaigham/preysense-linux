@@ -16,22 +16,28 @@ are baseline observations, not application caps or proven factory defaults.
 Finite Tau selections are supported; encoded endpoints require a verified time
 unit and can be unavailable. Linux may report a nearby representable window.
 
-Tuning's mode dropdown switches the active mode. Saved per-mode CPU policies
-follow later mode changes. Calibration cycles only missing modes in Windows
-order, waits for stable readings and restores the original mode; see
+The Tuning window matches Windows ModeSettingsWindow: Enable Tuning, global
+PROCHOT offset (MSR 0x1A2 via signed `preysense.ko`), Performance Mode, CPU
+Boost switch (`intel_pstate` no_turbo), CPU/GPU Power Limits with apply
+switches, and Reset/Apply/Save. Mode dropdown switches the active Acer profile.
+Saved per-mode CPU/GPU policies and global PROCHOT fields live in
+`preysense.json` (`HardwareTuningEnabled`, `ApplyProchotOffset`, per-mode
+`ApplyCpuLimits` / `ApplyGpuLimits`). Calibration cycles only missing modes in
+Windows order, waits for stable readings and restores the original mode; see
 [calibration](calibration.md).
 
 ## Fans
 
-Auto and Max use firmware policy. Custom has separate monotonic CPU/GPU curves
-shown from40–100°C,5°C cooling hysteresis and one shared0–5second response timer.
-Both curves follow the hotter valid temperature. GPU temperature is requested
-only while the GPU is already active; CPU temperature alone is used otherwise.
-No fan RPM or unrelated telemetry is needed to run Custom control. Missing CPU
-temperature and failed writes release software control. The kernel's8second
-watchdog returns stalled software ownership to firmware. There is no separate
-emergency-temperature override. Editing a different fan profile does not switch
-the active mode.
+Auto and Max use firmware policy. Custom uses Windows-parity EC stages: advance
+when CPU or GPU hits a stage rise, retreat only when both sensors clear the
+previous rise, shared 0–5 s delay, and both fans commanded at max(cpu, gpu)
+duty. The editor graphs entry °C versus duty per channel (Temp / Duty / RPM
+rows). GPU temperature is requested only while the GPU is already active; CPU
+temperature alone is used otherwise. No fan RPM or unrelated telemetry is
+needed to run Custom control. Missing CPU temperature and failed writes release
+software control. The kernel's 8 second watchdog returns stalled software
+ownership to firmware. There is no separate emergency-temperature override.
+Editing a different fan profile does not switch the active mode.
 
 ## Lighting
 
@@ -53,10 +59,11 @@ charging use bounded Acer controls. USB charging0 is displayed as Off.
 
 ## Overlay
 
-The native Qt overlay has eight paired CPU/GPU slots, optional graphs and fan
-RPM. Displayed RPM rounds to the nearest100. Missing values remain N/A. CPU/GPU voltage telemetry has been removed. RAM speed is the configured firmware transfer
-rate with the user-requested MHz label. No game FPS collection or launch wrapper
-exists. [Overlay](overlay.md), [telemetry](telemetry.md).
+The native Qt overlay covers Usage/Temp/Clocks/CPU VID/Power/Memory/Fan slots
+with add/remove and optional graphs. FPS, GPU Voltage, Hotspot, Memory
+Temperature, and PerfCap are omitted. RAM speed is the configured firmware
+transfer rate with the user-requested MHz label.
+[Overlay](overlay.md), [telemetry](telemetry.md).
 
 ## Background work
 
@@ -65,10 +72,19 @@ telemetry stops when neither the overlay nor custom fans require sensors. Power
 source and native key changes are event-driven with the updated driver. Software
 RGB effects retain their animation timer. [Event-driven behavior](event-driven.md).
 
+## Battery energy saver
+
+Windows Energy Saver is a `powercfg` DC threshold on the active scheme. Linux has
+no equivalent switch. On-battery power saving is already covered by source
+profiles (typically Eco/Quiet → `power-profiles-daemon` `power-saver`) plus any
+saved RAPL limits for that mode. A separate Energy Saver toggle is not planned.
+
 ## Deliberately removed
 
-Custom ACPI tables, PCCC/cross-throttle patches, OpenCore setup, GPU offset power
-controls, BlueLight Shield, LCD overdrive UI, game automation/launching, FPS,
-MangoHud, Acer services toggles, extended CPU boost options and battery energy
-saver toggles are outside the Linux app. Normal Acer WMI transport remains in the
-small signed driver; it does not inject replacement ACPI tables.
+Custom ACPI tables, PCCC/cross-throttle patches, OpenCore setup, BlueLight Shield,
+LCD overdrive UI, game automation/launching, FPS/MangoHud, Acer services toggles,
+Windows PERFBOOSTMODE variants (Linux keeps a boolean Boost switch), live
+Advanced Optimus mux switching, and a separate Windows-style Energy Saver toggle
+are outside the Linux app. Normal Acer WMI transport remains in the small signed
+driver; it does not inject replacement ACPI tables. GPU ERM4 CT/DB/CP offsets
+under Secure Boot: [gpu-power-limits](gpu-power-limits.md).

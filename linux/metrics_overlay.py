@@ -52,20 +52,71 @@ def first_available(*values):
     return next((v for v in values if numeric(v) is not None), None)
 
 
-CPU_CHOICES = ("None", "Usage", "Max Core", "P-Core Usage", "E-Core Usage", "Temperature", "P-Core", "E-Core", "Power", "Memory", "Memory Speed", "Fan Speed")
-GPU_CHOICES = ("None", "Usage", "Temperature", "Clock", "Power", "Memory", "Memory Speed", "Fan Speed")
-DEFAULT_COLUMNS = (("Usage", "Usage"), ("Temperature", "Temperature"), ("P-Core", "Clock"), ("None", "None"), ("Power", "Power"), ("Memory", "Memory"), ("Memory Speed", "Memory Speed"), ("Fan Speed", "Fan Speed"))
-WIDTHS = {"Usage":22, "Max Core":22, "P-Core Usage":22, "E-Core Usage":22, "Temperature":32, "P-Core":44, "E-Core":44, "Clock":44, "Memory Speed":44, "Power":38, "Memory":32, "Fan Speed":50}
+# Windows-aligned choices minus FPS and GPU metrics that stay N/A without NVAPI.
+CPU_CHOICES = ("None", "Usage", "Temperature", "Active Clock", "Effective Clock", "Voltage", "Power", "Memory", "Memory Speed", "Fan Speed")
+GPU_CHOICES = ("None", "Usage", "Temperature", "Clock", "Power", "Power Limit", "Memory", "Memory Speed", "Fan Speed")
+DEFAULT_COLUMNS = (
+    ("Usage", "Usage"),
+    ("Temperature", "Temperature"),
+    ("Effective Clock", "Clock"),
+    ("Voltage", "None"),
+    ("Power", "Power"),
+    ("Memory", "Memory"),
+    ("Memory Speed", "Memory Speed"),
+)
+DEFAULT_GRAPHS = (False, False, False, False, True, False, False)
+LEGACY_CPU = {"P-Core": "Effective Clock", "E-Core": "None", "Max Core": "Usage", "P-Core Usage": "Usage", "E-Core Usage": "Usage"}
+LEGACY_GPU = {
+    "Voltage": "None",
+    "Hotspot": "Temperature",
+    "Memory Temperature": "None",
+    "PerfCap Reason": "None",
+}
+WIDTHS = {
+    "Usage": 22, "Temperature": 32,
+    "Active Clock": 44, "Effective Clock": 44, "Clock": 44, "Voltage": 44, "Memory Speed": 44,
+    "Power": 38, "Power Limit": 38, "Memory": 32, "Fan Speed": 50,
+}
+MAX_OVERLAY_SLOTS = 12
+
+
+def _migrate_metric(metric, gpu=False):
+    table = LEGACY_GPU if gpu else LEGACY_CPU
+    metric = table.get(metric, metric)
+    choices = GPU_CHOICES if gpu else CPU_CHOICES
+    return metric if metric in choices else "None"
 
 
 def metric_value(data, metric, gpu=False):
-    """Only read semantically matching fields; aggregate CPU clock is not P-Core."""
+    """Only read semantically matching fields."""
     info = (data.get("gpu") or {}) if gpu else data
-    fields = {"Usage":"usage" if gpu else "cpu_usage", "Temperature":"temperature" if gpu else "cpu_temp", "Power":"power" if gpu else "cpu_power_w", "Clock":"clock", "Memory":"memory_used_gb" if gpu else "memory_used_gb", "Memory Speed":"memory_clock_mhz" if gpu else "memory_speed_mhz", "P-Core":"cpu_p_core_mhz", "E-Core":"cpu_e_core_mhz", "Max Core":"cpu_max_core_usage", "P-Core Usage":"cpu_p_core_usage", "E-Core Usage":"cpu_e_core_usage"}
-    value = data.get("gpu_fan" if gpu else "cpu_fan") if metric == "Fan Speed" else info.get(fields.get(metric, ""))
+    fields = {
+        "Usage": "usage" if gpu else "cpu_usage",
+        "Temperature": "temperature" if gpu else "cpu_temp",
+        "Power": "power" if gpu else "cpu_power_w",
+        "Power Limit": "enforced_power_limit_w",
+        "Clock": "clock",
+        "Active Clock": "cpu_p_core_mhz",
+        "Effective Clock": "cpu_p_core_mhz",
+        "Voltage": "cpu_voltage_v",
+        "Memory": "memory_used_gb" if gpu else "memory_used_gb",
+        "Memory Speed": "memory_clock_mhz" if gpu else "memory_speed_mhz",
+    }
+    if metric == "Fan Speed":
+        value = data.get("gpu_fan" if gpu else "cpu_fan")
+    elif metric == "Voltage":
+        if gpu:
+            return None
+        value = first_available(info.get("cpu_voltage_v"), data.get("cpu_voltage_v"))
+    elif metric in ("Active Clock", "Effective Clock"):
+        value = first_available(info.get("cpu_p_core_mhz"), data.get("cpu_p_core_mhz"), data.get("cpu_frequency_mhz"))
+    else:
+        value = info.get(fields.get(metric, ""))
     if gpu and metric == "Temperature":
         value = first_available(value, data.get("gpu_temp"))
-    return numeric(value, positive=metric in ("Temperature", "P-Core", "E-Core", "Clock", "Memory Speed"))
+    return numeric(value, positive=metric in (
+        "Temperature", "Active Clock", "Effective Clock", "Clock", "Memory Speed", "Power Limit", "Voltage",
+    ))
 
 
 def graph_value(data, metric, gpu=False):
@@ -80,9 +131,12 @@ def column_text(data, metric, gpu=False):
     value = metric_value(data, metric, gpu)
     if value is None: return "N/A"
     if metric == "Fan Speed":value=math.floor(value/100+.5)*100
-    units = {"Usage":"%", "Max Core":"%", "P-Core Usage":"%", "E-Core Usage":"%", "Temperature":"°C", "P-Core":"MHz", "E-Core":"MHz", "Clock":"MHz", "Power":"W", "Memory":"GB", "Memory Speed":"MHz", "Fan Speed":"RPM"}
-    if metric == "Memory Speed" and not gpu: units[metric] = "MHz"
-    digits = 1 if metric in ("Power", "Memory") else 0
+    units = {
+        "Usage": "%", "Temperature": "°C",
+        "Active Clock": "MHz", "Effective Clock": "MHz", "Clock": "MHz", "Voltage": "V",
+        "Power": "W", "Power Limit": "W", "Memory": "GB", "Memory Speed": "MHz", "Fan Speed": "RPM",
+    }
+    digits = 3 if metric == "Voltage" else (1 if metric in ("Power", "Power Limit", "Memory") else 0)
     return metric_text(value, units.get(metric, ""), digits)
 
 
@@ -127,13 +181,23 @@ class HardwareOverlay(QWidget):
         self.columns = []
         self.column_graphs = []
         self.metric_history = {}
-        for i, default in enumerate(DEFAULT_COLUMNS):
+        slot_count = int(settings.value("overlay_slot_count", len(DEFAULT_COLUMNS)))
+        slot_count = max(0, min(MAX_OVERLAY_SLOTS, slot_count))
+        if slot_count == 0 and settings.contains("overlay_col_1"):
+            slot_count = len(DEFAULT_COLUMNS)
+        for i in range(slot_count or len(DEFAULT_COLUMNS)):
+            default = DEFAULT_COLUMNS[i] if i < len(DEFAULT_COLUMNS) else ("None", "None")
             stored = str(settings.value(f"overlay_col_{i+1}", "|".join(default))).split("|")
-            if len(stored)==2 and 'Voltage' in stored:
-                stored=['None' if metric=='Voltage' else metric for metric in stored]
-                settings.setValue(f'overlay_col_{i+1}','|'.join(stored))
-            self.columns.append(tuple(stored) if len(stored) == 2 and stored[0] in CPU_CHOICES and stored[1] in GPU_CHOICES else default)
-            self.column_graphs.append(settings.value(f"overlay_col_{i+1}_graph", i == 4, type=bool))
+            if len(stored) != 2:
+                stored = list(default)
+            cpu = _migrate_metric(stored[0], False)
+            gpu = _migrate_metric(stored[1], True)
+            if (cpu, gpu) != tuple(stored):
+                settings.setValue(f"overlay_col_{i+1}", f"{cpu}|{gpu}")
+            self.columns.append((cpu, gpu))
+            default_graph = DEFAULT_GRAPHS[i] if i < len(DEFAULT_GRAPHS) else False
+            self.column_graphs.append(settings.value(f"overlay_col_{i+1}_graph", default_graph, type=bool))
+        self.settings.setValue("overlay_slot_count", len(self.columns))
 
         # 60 samples history matching C# deque
         self.history_len = 60
@@ -188,9 +252,10 @@ class HardwareOverlay(QWidget):
         line=max(math.ceil(BASE_LINE_HEIGHT*sc), math.ceil(fm.height()))
         gap=max(1, math.ceil(sc))
         label=math.ceil(max(fm.horizontalAdvance(v) for v in ('CPU','GPU')))+math.ceil(1*sc)
-        samples={'Usage':'100%', 'Max Core':'100%', 'P-Core Usage':'100%', 'E-Core Usage':'100%',
-                 'Temperature':'100°C','P-Core':'6000MHz','E-Core':'6000MHz','Clock':'6000MHz',
-                 'Power':'250.0W','Memory':'32.0GB','Memory Speed':'12000MHz','Fan Speed':'10000RPM'}
+        samples={'Usage':'100%', 'Temperature':'100°C',
+                 'Active Clock':'6000MHz','Effective Clock':'6000MHz','Clock':'6000MHz','Voltage':'1.250V',
+                 'Power':'250.0W','Power Limit':'250.0W',
+                 'Memory':'32.0GB','Memory Speed':'12000MHz','Fan Speed':'10000RPM'}
         columns=[]
         for i,pair in enumerate(self.columns):
             if pair==('None','None'):columns.append((0,0));continue
@@ -270,7 +335,7 @@ class HardwareOverlay(QWidget):
         return {"cpu": sorted(cpu), "gpu": sorted(gpu), "visible": visible}
 
     def set_column(self, index, cpu, gpu, graph=None):
-        if not 0 <= index < 8 or cpu not in CPU_CHOICES or gpu not in GPU_CHOICES:
+        if not 0 <= index < len(self.columns) or cpu not in CPU_CHOICES or gpu not in GPU_CHOICES:
             raise ValueError("Invalid overlay column")
         self.columns[index] = (cpu, gpu)
         self.settings.setValue(f"overlay_col_{index+1}", f"{cpu}|{gpu}")
@@ -282,6 +347,41 @@ class HardwareOverlay(QWidget):
         self.reposition()
         self._notify_metrics_demand()
         self.update()
+
+    def add_slot(self, cpu="None", gpu="None", graph=False):
+        if len(self.columns) >= MAX_OVERLAY_SLOTS:
+            return False
+        self.columns.append((_migrate_metric(cpu), _migrate_metric(gpu, True)))
+        self.column_graphs.append(bool(graph))
+        index = len(self.columns) - 1
+        self.settings.setValue(f"overlay_col_{index+1}", f"{self.columns[index][0]}|{self.columns[index][1]}")
+        self.settings.setValue(f"overlay_col_{index+1}_graph", bool(graph))
+        self.settings.setValue("overlay_slot_count", len(self.columns))
+        self.sync_graph_metrics()
+        self.recalculate_size()
+        self.reposition()
+        self._notify_metrics_demand()
+        self.update()
+        return True
+
+    def remove_slot(self, index):
+        if not 0 <= index < len(self.columns):
+            return False
+        self.columns.pop(index)
+        self.column_graphs.pop(index)
+        for i, pair in enumerate(self.columns):
+            self.settings.setValue(f"overlay_col_{i+1}", f"{pair[0]}|{pair[1]}")
+            self.settings.setValue(f"overlay_col_{i+1}_graph", self.column_graphs[i])
+        for i in range(len(self.columns), MAX_OVERLAY_SLOTS):
+            self.settings.remove(f"overlay_col_{i+1}")
+            self.settings.remove(f"overlay_col_{i+1}_graph")
+        self.settings.setValue("overlay_slot_count", len(self.columns))
+        self.sync_graph_metrics()
+        self.recalculate_size()
+        self.reposition()
+        self._notify_metrics_demand()
+        self.update()
+        return True
 
     def setVisible(self, visible):
         super().setVisible(visible)
@@ -485,6 +585,19 @@ class HardwareOverlay(QWidget):
             self.recalculate_size();self.reposition()
 
 
+def _metric_label(metric, gpu=False):
+    if metric == "None":
+        return "None"
+    labels = {
+        "Fan Speed": "Fan",
+        "Active Clock": "Active Clock",
+        "Effective Clock": "Effective Clock",
+        "Voltage": "VID",
+        "Power Limit": "Power Limit",
+    }
+    return ("GPU " if gpu else "CPU ") + labels.get(metric, metric)
+
+
 def controls(owner, layout):
     """Exact port of PreySense.Frontend/Views/MetricsWindow.xaml."""
     dialog=layout.parentWidget()
@@ -494,7 +607,7 @@ def controls(owner, layout):
         dialog.setFixedWidth(540)
         from window_chrome import WindowTitleBar
         layout.setContentsMargins(0,0,0,0);layout.setSpacing(0)
-        layout.addWidget(WindowTitleBar(dialog,'Metrics'))
+        layout.addWidget(WindowTitleBar(dialog,'Overlay'))
         content=QWidget(dialog)
         root=layout
         layout=QVBoxLayout(content)
@@ -548,29 +661,65 @@ def controls(owner, layout):
 
     layout.addSpacing(4);separator = OverlaySeparator()
     layout.addWidget(separator);layout.addSpacing(8)
-    owner.overlay_slots = []
-    for index, pair in enumerate(owner.overlay.columns):
-        row = QWidget(); box = QHBoxLayout(row)
-        box.setContentsMargins(0, 3, 0, 3); box.setSpacing(4)
-        label = QLabel(f"Slot #{index+1}"); box.addWidget(label); box.addStretch()
-        combos = []
-        for gpu, choices in ((False, CPU_CHOICES), (True, GPU_CHOICES)):
-            combo = QComboBox(); combo.setFixedSize(168, 28)
-            for metric in choices:
-                text = "None" if metric == "None" else ("GPU " if gpu else "CPU ") + ({"P-Core":"P-Core", "Fan Speed":"Fan", "Max Core":"Max Core Usage"}.get(metric, metric))
-                combo.addItem(text, metric)
-            combo.setCurrentIndex(choices.index(pair[int(gpu)]))
-            box.addWidget(combo); combos.append(combo)
-        graph = RectangularSwitch(); graph.setChecked(owner.overlay.column_graphs[index])
-        box.addSpacing(4); box.addWidget(graph)
-        def save_column(*_, i=index, c=combos, g=graph):
-            owner.overlay.set_column(i, c[0].currentData(), c[1].currentData(), g.isChecked())
-        for combo in combos: combo.currentIndexChanged.connect(save_column)
-        graph.toggled.connect(save_column)
-        owner.overlay_slots.append((combos[0], combos[1], graph))
-        layout.addWidget(row)
 
+    header = QWidget(); header_box = QHBoxLayout(header)
+    header_box.setContentsMargins(0, 2, 0, 6); header_box.setSpacing(4)
+    header_box.addWidget(QLabel("Overlay Metric Slots")); header_box.addStretch()
+    add_btn = QPushButton("+ Add Slot"); add_btn.setFixedSize(88, 26)
+    header_box.addWidget(add_btn)
+    layout.addWidget(header)
+    slots_host = QWidget(); slots_layout = QVBoxLayout(slots_host)
+    slots_layout.setContentsMargins(0, 0, 0, 0); slots_layout.setSpacing(0)
+    layout.addWidget(slots_host)
+    empty = QLabel("No overlay slots configured. Click '+ Add Slot' to add metrics.")
+    empty.setStyleSheet("font-style: italic; color: #888;")
+    slots_layout.addWidget(empty)
 
+    def rebuild_slots():
+        while slots_layout.count():
+            item = slots_layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+        owner.overlay_slots = []
+        if not owner.overlay.columns:
+            note = QLabel("No overlay slots configured. Click '+ Add Slot' to add metrics.")
+            note.setStyleSheet("font-style: italic; color: #888;")
+            slots_layout.addWidget(note)
+            dialog.adjustSize() if isinstance(dialog, QDialog) else None
+            return
+        for index, pair in enumerate(owner.overlay.columns):
+            row = QWidget(); box = QHBoxLayout(row)
+            box.setContentsMargins(0, 3, 0, 3); box.setSpacing(4)
+            label = QLabel(f"Slot #{index+1}"); label.setFixedWidth(46); box.addWidget(label)
+            combos = []
+            for gpu, choices in ((False, CPU_CHOICES), (True, GPU_CHOICES)):
+                combo = QComboBox(); combo.setFixedSize(168, 28)
+                for metric in choices:
+                    combo.addItem(_metric_label(metric, gpu), metric)
+                combo.setCurrentIndex(max(0, choices.index(pair[int(gpu)])))
+                box.addWidget(combo); combos.append(combo)
+            graph = RectangularSwitch(); graph.setChecked(owner.overlay.column_graphs[index])
+            box.addSpacing(4); box.addWidget(graph)
+            remove = QPushButton("–"); remove.setFixedSize(28, 28); remove.setToolTip("Remove slot")
+            box.addWidget(remove)
+            def save_column(*_, i=index, c=combos, g=graph):
+                owner.overlay.set_column(i, c[0].currentData(), c[1].currentData(), g.isChecked())
+            def remove_column(*_, i=index):
+                owner.overlay.remove_slot(i); rebuild_slots()
+            for combo in combos: combo.currentIndexChanged.connect(save_column)
+            graph.toggled.connect(save_column)
+            remove.clicked.connect(remove_column)
+            owner.overlay_slots.append((combos[0], combos[1], graph))
+            slots_layout.addWidget(row)
+        if isinstance(dialog, QDialog):
+            dialog.adjustSize()
+
+    def add_slot():
+        if owner.overlay.add_slot():
+            rebuild_slots()
+    add_btn.clicked.connect(add_slot)
+    rebuild_slots()
 
 
 MetricsOverlay = HardwareOverlay

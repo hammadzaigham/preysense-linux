@@ -36,6 +36,8 @@ Technical references and guides for configuring, developing, and troubleshooting
 
 - [Development, Testing & Code Quality](development.md)
 - [Troubleshooting & Recovery](troubleshooting.md)
+- [Configuration (`preysense.json`)](configuration.md)
+- [GPU power limits / Secure Boot](gpu-power-limits.md)
 - [Event-Driven Architecture](event-driven.md)
 - [UI Styles and Components](ui-controls.md)
 

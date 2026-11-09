@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
-/* Narrow Acer Gaming WMI bridge. No arbitrary ACPI method or memory access. */
+/* Narrow Acer Gaming WMI bridge plus bounded ERM4 GPU-offset MMIO for PHN16S-71. */
 #include <linux/module.h>
 #include <linux/acpi.h>
 #include <linux/dmi.h>
@@ -11,6 +11,9 @@
 #include <linux/power_supply.h>
 #include <linux/input.h>
 #include <linux/ktime.h>
+#include <linux/io.h>
+#include <linux/delay.h>
+#include <asm/msr.h>
 
 #define GAMING_GUID "7A4DDFE7-5B5D-40B4-8595-4408E0CC7F56"
 static DEFINE_MUTEX(gate);
@@ -402,8 +405,344 @@ static DEVICE_ATTR(cpu_temp, 0444, sensor_show, NULL);
 static DEVICE_ATTR(gpu_temp, 0444, sensor_show, NULL);
 static DEVICE_ATTR(cpu_fan, 0444, sensor_show, NULL);
 static DEVICE_ATTR(gpu_fan, 0444, sensor_show, NULL);
+
+/* Requested core VID from IA32_PERF_STATUS[47:32], millivolts (Windows MSR path). */
+static ssize_t cpu_vid_mv_show(struct device *dev, struct device_attribute *a, char *buf)
+{
+	u64 raw;
+	u32 code, mv;
+	int err = rdmsrl_safe(0x198, &raw);
+
+	if (err)
+		return err;
+	code = (raw >> 32) & 0xffff;
+	mv = (code * 1000u) / 8192u;
+	if (!mv || mv > 2500)
+		return -ENODATA;
+	return sysfs_emit(buf, "%u\n", mv);
+}
+static DEVICE_ATTR_RO(cpu_vid_mv);
+
+/*
+ * Intel TCC/PROCHOT offset (MSR 0x1A2), matching Windows CpuProchotController.
+ * Show: "offset tjmax locked". Store: offset 0–63. Preserves other TEMPERATURE_TARGET bits.
+ */
+#define MSR_TEMPERATURE_TARGET 0x1A2ULL
+#define MSR_PLATFORM_INFO 0xCEULL
+#define PROCHOT_OFFSET_MASK (0x3FULL << 24)
+#define PROCHOT_LOCK_BIT BIT_ULL(31)
+
+static DEFINE_MUTEX(prochot_gate);
+
+static ssize_t cpu_prochot_show(struct device *dev, struct device_attribute *a, char *buf)
+{
+	u64 raw;
+	int err, target, offset;
+
+	mutex_lock(&prochot_gate);
+	err = rdmsrl_safe(MSR_TEMPERATURE_TARGET, &raw);
+	mutex_unlock(&prochot_gate);
+	if (err)
+		return err;
+	target = (int)((raw >> 16) & 0xFF);
+	offset = (int)((raw & PROCHOT_OFFSET_MASK) >> 24);
+	if (target < 40 || target > 125 || offset >= target || (raw & BIT_ULL(30)))
+		return -ENODATA;
+	return sysfs_emit(buf, "%d %d %u\n", offset, target, (raw & PROCHOT_LOCK_BIT) ? 1 : 0);
+}
+
+static ssize_t cpu_prochot_store(struct device *dev, struct device_attribute *a, const char *buf, size_t count)
+{
+	unsigned int offset;
+	u64 platform, original, desired, actual, current;
+	int err, target;
+	char extra;
+
+	if (sscanf(buf, "%u %c", &offset, &extra) != 1)
+		return -EINVAL;
+	if (offset > 63)
+		return -EINVAL;
+
+	mutex_lock(&prochot_gate);
+	err = rdmsrl_safe(MSR_PLATFORM_INFO, &platform);
+	if (err)
+		goto out;
+	if (!(platform & BIT_ULL(30))) {
+		err = -EOPNOTSUPP;
+		goto out;
+	}
+	err = rdmsrl_safe(MSR_TEMPERATURE_TARGET, &original);
+	if (err)
+		goto out;
+	if (original & BIT_ULL(30)) {
+		err = -EINVAL;
+		goto out;
+	}
+	target = (int)((original >> 16) & 0xFF);
+	if (target < 40 || target > 125 || (int)offset >= target) {
+		err = -ERANGE;
+		goto out;
+	}
+	if ((original & PROCHOT_LOCK_BIT) &&
+	    (int)((original & PROCHOT_OFFSET_MASK) >> 24) != (int)offset) {
+		err = -EPERM;
+		goto out;
+	}
+	desired = (original & ~PROCHOT_OFFSET_MASK) | ((u64)offset << 24);
+	if (desired == original) {
+		err = 0;
+		goto out;
+	}
+	err = wrmsrl_safe(MSR_TEMPERATURE_TARGET, desired);
+	if (!err && !rdmsrl_safe(MSR_TEMPERATURE_TARGET, &actual) && actual == desired) {
+		err = 0;
+		goto out;
+	}
+	/* Rejected write may still have changed the register — restore offset only. */
+	if (!rdmsrl_safe(MSR_TEMPERATURE_TARGET, &current)) {
+		if ((current & PROCHOT_OFFSET_MASK) != (original & PROCHOT_OFFSET_MASK) &&
+		    !(current & PROCHOT_LOCK_BIT))
+			wrmsrl_safe(MSR_TEMPERATURE_TARGET,
+				    (current & ~PROCHOT_OFFSET_MASK) | (original & PROCHOT_OFFSET_MASK));
+	}
+	err = -EIO;
+out:
+	mutex_unlock(&prochot_gate);
+	return err ? err : count;
+}
+static DEVICE_ATTR(cpu_prochot, 0664, cpu_prochot_show, cpu_prochot_store);
+
+/*
+ * Acer ERM4 GPU profile table (Windows AcerErm4Table / AcerProfileApplyTransaction).
+ * Bounded ioremap of the PHN16S-71 Predator signature window only — Secure Boot OK
+ * when this module is MOK-signed. Not /dev/mem and not nvidia-smi -pl.
+ */
+#define ERM4_PHN16S71_BASE 0xFE800400ULL
+#define ERM4_WINDOW 0x100
+static void __iomem *erm4;
+static DEFINE_MUTEX(erm4_gate);
+
+static u16 erm4_db_offset(u8 mode)
+{
+	switch (mode) {
+	case 0: return 0xA4;
+	case 1: return 0xAC;
+	case 4: return 0xB4;
+	case 5: return 0xBC;
+	case 6: return 0xC4;
+	default: return 0;
+	}
+}
+
+static bool erm4_signature_ok(void __iomem *base)
+{
+	static const char sig[] = "Predator";
+	unsigned int i;
+
+	for (i = 0; i < sizeof(sig) - 1; i++)
+		if (ioread8(base + i) != (u8)sig[i])
+			return false;
+	return true;
+}
+
+static int erm4_map(void)
+{
+	void __iomem *map = ioremap(ERM4_PHN16S71_BASE, ERM4_WINDOW);
+
+	if (!map)
+		return -ENOMEM;
+	if (!erm4_signature_ok(map)) {
+		iounmap(map);
+		return -ENODEV;
+	}
+	erm4 = map;
+	pr_info("preysense: ERM4 GPU offsets at 0x%llx\n", (unsigned long long)ERM4_PHN16S71_BASE);
+	return 0;
+}
+
+static void erm4_unmap(void)
+{
+	if (erm4) {
+		iounmap(erm4);
+		erm4 = NULL;
+	}
+}
+
+static int acer_mode_get(u8 *mode)
+{
+	u64 out;
+	int ret = gaming(23, 11, false, &out);
+
+	if (ret)
+		return ret;
+	*mode = (u8)((out >> 8) & 255);
+	return 0;
+}
+
+static int acer_mode_set(u8 mode)
+{
+	u64 out;
+
+	return gaming(22, 11 | ((u32)mode << 8), true, &out);
+}
+
+static int acer_mode_wait(u8 expected)
+{
+	int i;
+	u8 mode;
+
+	for (i = 0; i < 20; i++) {
+		if (!acer_mode_get(&mode) && mode == expected)
+			return 0;
+		msleep(50);
+	}
+	return -ETIMEDOUT;
+}
+
+static void erm4_read_triplet(u8 mode, u8 *db, u8 *ct, u8 *cp)
+{
+	u16 off = erm4_db_offset(mode);
+
+	*db = ioread8(erm4 + off);
+	*ct = ioread8(erm4 + off + 1);
+	*cp = ioread8(erm4 + off + 2);
+}
+
+static void erm4_write_triplet(u8 mode, u8 db, u8 ct, u8 cp)
+{
+	u16 off = erm4_db_offset(mode);
+
+	iowrite8(db, erm4 + off);
+	iowrite8(ct, erm4 + off + 1);
+	iowrite8(cp, erm4 + off + 2);
+}
+
+static bool erm4_verify_triplet(u8 mode, u8 db, u8 ct, u8 cp)
+{
+	u8 rdb, rct, rcp;
+
+	erm4_read_triplet(mode, &rdb, &rct, &rcp);
+	return rdb == db && rct == ct && rcp == cp;
+}
+
+static ssize_t gpu_offsets_show(struct device *dev, struct device_attribute *a, char *buf)
+{
+	static const u8 modes[] = { 0, 1, 4, 5, 6 };
+	size_t n = 0;
+	unsigned int i;
+
+	if (!erm4)
+		return -ENODEV;
+	mutex_lock(&erm4_gate);
+	for (i = 0; i < ARRAY_SIZE(modes); i++) {
+		u8 db, ct, cp;
+
+		erm4_read_triplet(modes[i], &db, &ct, &cp);
+		n += scnprintf(buf + n, PAGE_SIZE - n, "%u %u %u %u\n", modes[i], ct, db, cp);
+	}
+	mutex_unlock(&erm4_gate);
+	return n;
+}
+
+static ssize_t gpu_offsets_store(struct device *dev, struct device_attribute *a, const char *buf, size_t count)
+{
+	unsigned int mode, ct, db, cp = 0;
+	char extra;
+	int matched, ret;
+	u8 selected, original, staging, orig_db, orig_ct, orig_cp;
+	bool wrote = false;
+
+	if (!erm4)
+		return -ENODEV;
+	matched = sscanf(buf, "%u %u %u %u %c", &mode, &ct, &db, &cp, &extra);
+	if (matched != 3 && matched != 4)
+		return -EINVAL;
+	if (mode != 0 && mode != 1 && mode != 4 && mode != 5 && mode != 6)
+		return -EINVAL;
+	if (ct > 100 || ct % 5 || db > 25 || db % 5)
+		return -EINVAL;
+	if (matched == 4 && (cp > 100 || cp % 5))
+		return -EINVAL;
+
+	selected = (u8)mode;
+	staging = selected == 4 ? 1 : 4;
+
+	mutex_lock(&control_gate);
+	mutex_lock(&erm4_gate);
+	if (manual_active)
+		restore_auto();
+	ret = acer_mode_get(&original);
+	if (ret)
+		goto out;
+	erm4_read_triplet(selected, &orig_db, &orig_ct, &orig_cp);
+	if (matched == 3)
+		cp = orig_cp;
+
+	if (original == selected) {
+		ret = acer_mode_set(staging);
+		if (ret)
+			goto out;
+		ret = acer_mode_wait(staging);
+		if (ret)
+			goto restore_mode;
+	}
+	{
+		u8 before;
+
+		ret = acer_mode_get(&before);
+		if (ret || before == selected) {
+			ret = ret ? ret : -EBUSY;
+			goto restore_mode;
+		}
+	}
+	wrote = true;
+	erm4_write_triplet(selected, (u8)db, (u8)ct, (u8)cp);
+	if (!erm4_verify_triplet(selected, (u8)db, (u8)ct, (u8)cp)) {
+		ret = -EIO;
+		goto rollback;
+	}
+	msleep(2000);
+	ret = acer_mode_set(selected);
+	if (ret)
+		goto rollback;
+	ret = acer_mode_wait(selected);
+	if (ret || !erm4_verify_triplet(selected, (u8)db, (u8)ct, (u8)cp)) {
+		ret = ret ? ret : -EIO;
+		goto rollback;
+	}
+	ret = 0;
+	goto out;
+
+rollback:
+	if (wrote) {
+		u8 cur;
+
+		if (!acer_mode_get(&cur) && cur == selected)
+			acer_mode_set(staging);
+		acer_mode_wait(staging);
+		erm4_write_triplet(selected, orig_db, orig_ct, orig_cp);
+	}
+restore_mode:
+	acer_mode_set(original);
+	acer_mode_wait(original);
+out:
+	mutex_unlock(&erm4_gate);
+	mutex_unlock(&control_gate);
+	return ret ? ret : count;
+}
+static DEVICE_ATTR(gpu_offsets, 0664, gpu_offsets_show, gpu_offsets_store);
+
+static ssize_t gpu_offsets_available_show(struct device *dev, struct device_attribute *a, char *buf)
+{
+	return sysfs_emit(buf, "%u\n", erm4 ? 1 : 0);
+}
+static DEVICE_ATTR_RO(gpu_offsets_available);
+
 static struct attribute *preysense_attrs[] = { &dev_attr_profile.attr, &dev_attr_fan_mode.attr,
-	&dev_attr_cpu_temp.attr, &dev_attr_gpu_temp.attr, &dev_attr_cpu_fan.attr, &dev_attr_gpu_fan.attr, &dev_attr_battery_limit.attr, &dev_attr_fan_duty.attr, &dev_attr_boot_sound.attr, &dev_attr_led_timeout.attr, &dev_attr_usb_charging.attr, &dev_attr_lcd_overdrive.attr, &dev_attr_predator_events.attr, &dev_attr_event_notifications.attr, &dev_attr_predator_down.attr, &dev_attr_keyboard_idle_ms.attr, &dev_attr_shortcut_events.attr, &dev_attr_gpu_mux.attr, NULL };
+	&dev_attr_cpu_temp.attr, &dev_attr_gpu_temp.attr, &dev_attr_cpu_fan.attr, &dev_attr_gpu_fan.attr, &dev_attr_cpu_vid_mv.attr,
+	&dev_attr_cpu_prochot.attr,
+	&dev_attr_gpu_offsets.attr, &dev_attr_gpu_offsets_available.attr,
+	&dev_attr_battery_limit.attr, &dev_attr_fan_duty.attr, &dev_attr_boot_sound.attr, &dev_attr_led_timeout.attr, &dev_attr_usb_charging.attr, &dev_attr_lcd_overdrive.attr, &dev_attr_predator_events.attr, &dev_attr_event_notifications.attr, &dev_attr_predator_down.attr, &dev_attr_keyboard_idle_ms.attr, &dev_attr_shortcut_events.attr, &dev_attr_gpu_mux.attr, NULL };
 ATTRIBUTE_GROUPS(preysense);
 
 static int __init preysense_init(void)
@@ -415,12 +754,21 @@ static int __init preysense_init(void)
     INIT_WORK(&shortcut_notify_work, shortcut_notify_fn);
 	pdev = platform_device_register_simple("preysense", -1, NULL, 0);
 	if (IS_ERR(pdev)) return PTR_ERR(pdev);
+	/* ERM4 is optional: CPU/fans still work if the signature is absent. */
+	erm4_map();
 	ret = sysfs_create_groups(&pdev->dev.kobj, preysense_groups);
-	if (ret) platform_device_unregister(pdev);
-	else {
+	if (ret) {
+		erm4_unmap();
+		platform_device_unregister(pdev);
+	} else {
         atomic64_set(&keyboard_activity_ns, ktime_get_boottime_ns());
         ret = input_register_handler(&preysense_keys);
-        if (ret) { cancel_work_sync(&shortcut_notify_work); platform_device_unregister(pdev); return ret; }
+        if (ret) {
+		cancel_work_sync(&shortcut_notify_work);
+		erm4_unmap();
+		platform_device_unregister(pdev);
+		return ret;
+	}
         register_pm_notifier(&sleep_notifier);
     }
 	return ret;
@@ -432,6 +780,7 @@ static void __exit preysense_exit(void)
 	unregister_pm_notifier(&sleep_notifier);
 	cancel_delayed_work_sync(&fan_watchdog);
 	restore_auto();
+	erm4_unmap();
 	platform_device_unregister(pdev);
 }
 module_init(preysense_init);

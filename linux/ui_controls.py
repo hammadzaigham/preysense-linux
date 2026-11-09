@@ -99,6 +99,9 @@ class SettingSwitchRow(QWidget):
     def setChecked(self, val):
         self.switch.setChecked(val)
 
+    def blockSignals(self, blocked):
+        return self.switch.blockSignals(blocked)
+
 
 class SettingDropdownRow(QWidget):
     """Exact port of SettingDropdownRow.xaml."""

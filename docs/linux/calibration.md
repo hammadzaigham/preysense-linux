@@ -1,24 +1,36 @@
 # First-start calibration
 
-When calibration is missing or incomplete for the current model and BIOS, the
-app prompts to calibrate. Accepting runs a worker-thread mode cycle in Windows
-order: Eco, Quiet, Balanced, Performance, Turbo. Already-complete mode profiles
-are skipped and existing stored values are never overwritten.
+When factory CPU defaults are missing, the app prompts to calibrate. Accepting
+runs a worker-thread mode cycle in Windows order: Eco, Quiet, Balanced,
+Performance, Turbo. Already-complete modes are skipped and never overwritten.
 
-AC power is required. Each mode is confirmed, allowed2.5seconds to settle, then
-RAPL PL1/PL2/Tau and boost plus fan state are checked for stable readings. No CPU
-or GPU benchmark runs, and calibration does not write RAPL limits. Mode changes
-naturally apply firmware profiles. Custom/saved policies are paused during the
-cycle, and the original mode is restored on success, failure, cancellation or
-app exit. Failed/missing profiles are reported and can be retried at next startup.
+## Flow
 
-These are observed firmware-initialized settings, not proof of untouched factory
-defaults. They are stored per model/BIOS in ~/.local/share/PreySense/calibration.json.
-NVIDIA default power is a driver-reported reference only, not an application cap.
-The normal application does not cycle modes or perform recurring calibration reads.
+1. AC power is required for the whole cycle.
+2. Custom fans and owned RAPL writes are released before switching modes.
+3. Each missing mode is selected, confirmed, then allowed **2.0 s** to settle
+   (same settle window as Windows live capture).
+4. PL1/PL2/Tau (and boost when readable) must be stable across samples.
+5. Successful modes for this run are held in memory and committed together when
+   the cycle ends, so a mid-cycle failure does not write that mode. Modes that
+   already succeeded earlier remain on disk; only this run’s pending set is
+   discarded on cancel or AC loss.
+6. The original performance mode is always restored (with retries). Failure to
+   restore is reported explicitly.
 
-Intel RAPL uses kernel powercap sysfs. Acer OEM controls still need the small
-signed PreySense driver: it exposes bounded existing firmware methods and native
-key events, without installing replacement ACPI tables. Keep the desktop app
-unprivileged; running it as root does not replace those kernel interfaces.
-Secure Boot validation can stay enabled with the driver signing key enrolled.
+No CPU/GPU benchmark runs, and calibration does not write RAPL limits. Mode
+changes apply firmware profiles only.
+
+## Storage
+
+Profiles use Windows field names and are stored in:
+
+- `~/.config/PreySense/preysense.json` → `Tuning.FactoryDefaults`
+- plus a compatibility write to `~/.local/share/PreySense/calibration.json`
+
+These are observed firmware-initialized settings after mode switches, not proof
+of untouched factory silicon fuses. NVIDIA default power remains telemetry only.
+
+Intel RAPL uses kernel powercap sysfs. Acer OEM mode switching still needs the
+signed PreySense driver. Secure Boot can stay enabled with the driver key
+enrolled.

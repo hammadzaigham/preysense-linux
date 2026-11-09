@@ -7,9 +7,9 @@ os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from PySide6.QtCore import QPoint, Qt
 from PySide6.QtTest import QTest, QSignalSpy
-from PySide6.QtWidgets import QApplication, QSpinBox
+from PySide6.QtWidgets import QApplication
 from controls import ColorWheel, FanGraph
-from fan_curve import DEFAULT_DUTIES
+from fan_curve import default_stages, build_graph
 
 class ControlsUiTests(unittest.TestCase):
     @classmethod
@@ -25,37 +25,31 @@ class ControlsUiTests(unittest.TestCase):
         self.assertNotEqual(wheel.color.hueF(), old); self.assertGreaterEqual(spy.count(), 3)
         wheel.close()
     def graph(self):
-        spins = [QSpinBox() for _ in DEFAULT_DUTIES]
-        for spin, value in zip(spins, DEFAULT_DUTIES): spin.setRange(0, 100); spin.setValue(value)
-        graph = FanGraph(spins); graph.show(); self.app.processEvents()
-        return graph, spins
+        indices, temps, duties, lead = build_graph(default_stages(1), gpu=False)
+        graph = FanGraph(); graph.set_curve(temps, duties, lead); graph.show(); self.app.processEvents()
+        return graph, duties
     def test_blank_area_and_simple_click_never_jump_duty(self):
-        graph, spins = self.graph(); before = [s.value() for s in spins]
+        graph, duties = self.graph(); before = list(graph.values)
         QTest.mouseClick(graph, Qt.LeftButton, pos=QPoint(220, 20))
-        self.assertEqual([s.value() for s in spins], before)
-        point = graph.point(3, spins[3].value()).toPoint()
+        self.assertEqual(graph.values, before)
+        point = graph.point(1, graph.values[1]).toPoint()
         QTest.mouseClick(graph, Qt.LeftButton, pos=point)
-        self.assertEqual(graph.index, 3); self.assertEqual([s.value() for s in spins], before)
+        self.assertEqual(graph.index, 1); self.assertEqual(graph.values, before)
         graph.close()
-    def test_drag_locks_temperature_and_preserves_monotonicity(self):
-        graph, spins = self.graph(); point = graph.point(3, spins[3].value()).toPoint()
+    def test_drag_keeps_duty_nondecreasing(self):
+        graph, _ = self.graph(); point = graph.point(1, graph.values[1]).toPoint()
         QTest.mousePress(graph, Qt.LeftButton, pos=point)
-        QTest.mouseMove(graph, point + QPoint(100, -80), delay=10)
-        QTest.mouseRelease(graph, Qt.LeftButton, pos=point + QPoint(100, -80))
-        self.assertEqual(graph.index, 3); self.assertEqual(spins[3].value(), spins[4].value())
-        self.assertTrue(all(a.value() <= b.value() for a, b in zip(spins, spins[1:])))
+        QTest.mouseMove(graph, point + QPoint(0, -80), delay=10)
+        QTest.mouseRelease(graph, Qt.LeftButton, pos=point + QPoint(0, -80))
+        self.assertEqual(graph.index, 1)
+        self.assertTrue(all(a <= b for a, b in zip(graph.values, graph.values[1:])))
         self.assertIsNone(graph.origin); graph.close()
     def test_keyboard_point_selection_and_edit_are_bounded(self):
-        graph, spins = self.graph(); graph.setFocus()
+        graph, _ = self.graph(); graph.setFocus(); graph.index = 0; graph.selected.emit(0)
         QTest.keyClick(graph, Qt.Key_Right); self.assertEqual(graph.index, 1)
-        # Select index 3 where next point has room (index 3 is 26, index 4 is 26, index 6 is 35)
-        QTest.keyClick(graph, Qt.Key_Right)
-        QTest.keyClick(graph, Qt.Key_Right)
-        self.assertEqual(graph.index, 3)
-        # Verify Key_Up and Key_Down bounds
-        old = spins[3].value()
+        old = graph.values[1]
         QTest.keyClick(graph, Qt.Key_Down)
-        self.assertLessEqual(spins[3].value(), old)
+        self.assertLessEqual(graph.values[1], old)
         graph.close()
 
 if __name__ == '__main__': unittest.main()

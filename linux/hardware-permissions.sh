@@ -2,8 +2,10 @@
 # Called only by the root-owned systemd unit with the install user's group.
 set -eu
 group="$1"
-for name in profile fan_mode fan_duty battery_limit boot_sound led_timeout usb_charging gpu_mux; do
-    chgrp "$group" "/sys/devices/platform/preysense/$name"
+for name in profile fan_mode fan_duty battery_limit boot_sound led_timeout usb_charging gpu_mux gpu_offsets cpu_prochot; do
+    path="/sys/devices/platform/preysense/$name"
+    [ -e "$path" ] || continue
+    chgrp "$group" "$path"
 done
 for domain in /sys/class/powercap/intel-rapl:0 /sys/class/powercap/intel-rapl-mmio:0; do
     [ -r "$domain/name" ] || continue

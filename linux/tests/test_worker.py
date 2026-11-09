@@ -7,13 +7,13 @@ from unittest.mock import Mock
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 from PySide6.QtCore import QCoreApplication
 from preysense import Worker
-from fan_curve import FanCurve, DEFAULT_DUTIES
+from fan_curve import FanCurve, default_stages
 
 class WorkerTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls): cls.app=QCoreApplication.instance() or QCoreApplication([])
     def setUp(self):
-        self.w=Worker(); self.w.hardware=Mock(); self.w.hardware.root=Path("/nonexistent"); self.w.curve=FanCurve(DEFAULT_DUTIES,DEFAULT_DUTIES)
+        self.w=Worker(); self.w.hardware=Mock(); self.w.hardware.root=Path("/nonexistent"); self.w.curve=FanCurve(stages=default_stages(1), delay=0)
         self.w.calibrator=Mock()
         self.w.system_power=Mock();self.w.system_power.sync.return_value={};self.w.system_power.shutdown.return_value={}
         self.w.hardware.snapshot.return_value={'cpu_temp':'60','gpu_temp':'55'}
@@ -22,7 +22,7 @@ class WorkerTests(unittest.TestCase):
         self.w.hardware.snapshot.return_value={'cpu_temp':'60','gpu_temp':'80'}
         self.w.hardware.gpu_snapshot.return_value={'temperature':'80'}
         self.w.poll()
-        expected_duty = FanCurve(DEFAULT_DUTIES,DEFAULT_DUTIES).target(80)
+        expected_duty = FanCurve(stages=default_stages(1), delay=0).target(cpu_temp=60, gpu_temp=80)
         self.w.hardware.fan_duty.assert_called_once_with(*expected_duty)
         self.w.hardware.gpu_snapshot.assert_called_once_with(requested={'temperature'})
     def test_missing_cpu_restores_automatic(self):

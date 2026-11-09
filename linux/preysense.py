@@ -8,18 +8,19 @@ import time
 import signal
 from pathlib import Path
 from PySide6.QtCore import Qt, QTimer, QObject, QThread, Signal, Slot, QSettings, QLockFile, QStandardPaths
+from config_store import ConfigStore, JsonSettings
 from PySide6.QtGui import QColor, QIcon
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QPushButton, QComboBox, QSlider, QTabWidget, QGroupBox, QGridLayout,
-    QColorDialog, QSystemTrayIcon, QMenu, QCheckBox, QPlainTextEdit, QTableWidget, QTableWidgetItem, QSpinBox, QDoubleSpinBox)
+    QColorDialog, QSystemTrayIcon, QMenu, QCheckBox, QPlainTextEdit, QSpinBox, QDoubleSpinBox)
 from hardware import Hardware, MODES, EFFECTS, average_color
 from version import __version__
 from gpu_mode import GpuMode, requires_confirmation
 from system_power import SystemPower
 from calibration import Calibrator
 from source_profiles import SourceProfiles, detect_source
-from fan_curve import FanCurve, TEMPERATURES, DEFAULT_DUTIES, default_curve
+from fan_curve import FanCurve, default_stages, compact_stages, normalize_stages
 from display import Display
 from cpu_power import CpuPower
 from power_ownership import PowerOwnership
@@ -43,7 +44,8 @@ class Worker(QObject):
         self.gpu_mode = GpuMode()
         self.system_power=SystemPower(parent=self)
         self.source_profiles=SourceProfiles()
-        self.calibrator=Calibrator(root=self.hardware.root)
+        self.config_store=ConfigStore()
+        self.calibrator=Calibrator(root=self.hardware.root,config_store=self.config_store)
         self.calibration_enabled=not self.calibrator.needs_calibration()
         self.calibration_cycle=None
         self.shutting_down=False
@@ -169,7 +171,8 @@ class Worker(QObject):
                 policy=self.fan_policies.get(current)
                 if policy:
                     self.curve=None
-                    if policy['kind']=='Custom': self.curve=FanCurve(policy['cpu'],policy['gpu'],policy['delay'])
+                    if policy['kind']=='Custom':
+                        self.curve=FanCurve(stages=policy.get('stages'), delay=policy.get('delay', 2))
                     else: self.hardware.write('fan_mode',1 if policy['kind']=='Max' else 0)
                 power=self.power_policies.get(current)
                 if power:
@@ -183,7 +186,7 @@ class Worker(QObject):
                     cpu = float(data.get('cpu_temp') or 0)
                     gpu = float(data.get('gpu_temp') or 0)
                     if not 0 < cpu <= 125: raise RuntimeError('CPU temperature unavailable; custom fans stopped')
-                    duty = self.curve.target(max(cpu,gpu) if 0 < gpu <= 125 else cpu)
+                    duty = self.curve.target(cpu_temp=cpu, gpu_temp=(gpu if 0 < gpu <= 125 else 0))
                     self.hardware.fan_duty(*duty)
                     data['custom_fans'] = list(duty)
                 except Exception as exc:
@@ -256,7 +259,16 @@ class Worker(QObject):
                 if name=='fan_policy': self.fan_policies[mode]=fan_policy(args['policy'])
                 else: self.power_policies[mode]=power_policy(args['policy'])
                 if self.hardware.bridge_read('profile')==mode:self.last_policy_mode=None
-
+            elif name == 'gpu_offsets':
+                from gpu_offsets import GpuOffsets
+                GpuOffsets().apply(args['mode'], args['ct'], args['db'], args.get('cp'))
+            elif name == 'cpu_prochot':
+                from cpu_prochot import CpuProchot
+                snap = CpuProchot().apply(int(args))
+                self.done.emit(
+                    f'PROCHOT offset set to {snap.offset_celsius}°C (activates at {snap.activation_celsius}°C)',
+                    '')
+                return
             elif name=='cpu_boost':
                 self.cpu_power.set_boost(args)
             elif name == 'cpu_power':
@@ -365,7 +377,10 @@ class Window(QMainWindow):
         self.auto_hidden_windows=[]
         for effect in (Qt.UI_AnimateMenu, Qt.UI_FadeMenu, Qt.UI_AnimateCombo, Qt.UI_AnimateTooltip, Qt.UI_FadeTooltip, Qt.UI_AnimateToolBox):
             QApplication.setEffectEnabled(effect, False)
-        self.settings = QSettings('PreySense', 'Linux')
+        legacy = QSettings('PreySense', 'Linux')
+        self.config_store = getattr(self.worker, 'config_store', None) or ConfigStore()
+        self.settings = JsonSettings(self.config_store)
+        self.settings.ensure_migrated(legacy)
         self.setWindowTitle('PreySense · Linux')
         self.resize(840, 650)
         icon = Path(__file__).resolve().parent / 'assets/appicon.svg'
@@ -414,13 +429,17 @@ class Window(QMainWindow):
         self.overlay_toggle.setChecked(self.settings.value('overlay_visible',False,type=bool))
         self.overlay_toggle.toggled.connect(lambda enabled:self.settings.setValue('overlay_visible',enabled))
         QTimer.singleShot(150, lambda: self.command.emit('overlay_metrics', self.overlay.requested_metrics()))
+        self.saved_gpu_policies={}
         try:
             self.saved_fan_policies=policies(json.loads(self.settings.value('fan_policies','{}')),fan_policy)
             self.saved_power_policies=policies(json.loads(self.settings.value('power_policies','{}')),power_policy)
+            loaded_gpu=json.loads(self.settings.value('gpu_policies','{}') or '{}')
+            if isinstance(loaded_gpu, dict):
+                self.saved_gpu_policies=loaded_gpu
             values=dict(fans=self.saved_fan_policies,power=self.saved_power_policies)
             if values['fans'] or values['power']:QTimer.singleShot(100,lambda:self.command.emit('mode_policies',values))
         except (KeyError,TypeError,ValueError):
-            self.saved_fan_policies={};self.saved_power_policies={}
+            self.saved_fan_policies={};self.saved_power_policies={};self.saved_gpu_policies={}
 
     def build(self):
         root = QWidget(); layout = QVBoxLayout(root)
@@ -457,19 +476,14 @@ class Window(QMainWindow):
         self.charge_apply = QPushButton('Apply limit'); self.charge_apply.clicked.connect(lambda: self.apply('battery_limit', int(self.charge.currentText()[:-1]))); charge.addWidget(self.charge_apply); charge.addStretch(); d.addLayout(charge)
         d.addStretch(); self.tabs.addTab(dashboard, 'Dashboard')
         curvepage = QWidget(); c = QVBoxLayout(curvepage)
-        self.curve_table = QTableWidget(len(TEMPERATURES),3); self.curve_table.setHorizontalHeaderLabels(['Temperature','CPU %','GPU %']); self.curve_spins = [[],[]]
-        for i,temp in enumerate(TEMPERATURES):
-            item = QTableWidgetItem(f'{temp} °C'); item.setFlags(item.flags() & ~Qt.ItemIsEditable); self.curve_table.setItem(i,0,item)
-            for channel in range(2):
-                spin = QSpinBox(); spin.setRange(0,100); spin.setSingleStep(5); spin.setValue(DEFAULT_DUTIES[i]); self.curve_table.setCellWidget(i,channel+1,spin); self.curve_spins[channel].append(spin)
-        self.curve_table.horizontalHeader().setStretchLastSection(True); c.addWidget(self.curve_table)
+        self.fan_stages = default_stages(1)
+        self.fan_channel_gpu = False
         delayrow = QHBoxLayout(); delayrow.addWidget(QLabel('Fan control delay (seconds)')); self.curve_delay = QDoubleSpinBox(); self.curve_delay.setRange(0,5); self.curve_delay.setSingleStep(1); self.curve_delay.setValue(2); delayrow.addWidget(self.curve_delay); c.addLayout(delayrow)
         try:
             saved_curve=json.loads(self.settings.value('fan_curve','null'))
-            if saved_curve:
-                FanCurve(**saved_curve)
-                for spins,key in zip(self.curve_spins,('cpu','gpu')):
-                    for spin,value in zip(spins,saved_curve[key]): spin.setValue(value)
+            if saved_curve and saved_curve.get('stages'):
+                FanCurve(stages=saved_curve['stages'], delay=saved_curve.get('delay', 2))
+                self.fan_stages = normalize_stages(saved_curve['stages'])
                 self.curve_delay.setValue(saved_curve['delay'])
         except (ValueError,TypeError,KeyError): pass
         self.curve_apply = QPushButton('Start custom fan curves'); self.curve_apply.clicked.connect(self.apply_curve); c.addWidget(self.curve_apply)
@@ -585,7 +599,7 @@ class Window(QMainWindow):
     def report_error(self,message):
         self.status.setText(message);self.feedback.emit(message,True)
     def finished(self, name, error):
-        labels={'cpu_power':'CPU limits','power_policy':'CPU profile','fan_policy':'Fan profile','fan_mode':'Fan mode','profile':'Performance mode','lighting':'Keyboard lighting','led_timeout':'Backlight timeout','usb_charging':'USB charging','battery_limit':'Battery limit','boot_sound':'Boot sound','display':'Refresh rate','auto_refresh':'Automatic refresh','mode_policies':'Saved mode policies'}
+        labels={'cpu_power':'CPU limits','power_policy':'CPU profile','gpu_offsets':'GPU offsets','cpu_prochot':'PROCHOT','fan_policy':'Fan profile','fan_mode':'Fan mode','profile':'Performance mode','lighting':'Keyboard lighting','led_timeout':'Backlight timeout','usb_charging':'USB charging','battery_limit':'Battery limit','boot_sound':'Boot sound','display':'Refresh rate','auto_refresh':'Automatic refresh','mode_policies':'Saved mode policies'}
         if name=='profile' and error:self.mode_switch.cancel();self._profile_preview=None
         label=labels.get(name,name.replace('_',' ').capitalize())
         text=(f'{label}: {error}' if error else name if name.startswith('GPU boot setting: ') else f'{label} applied successfully')
@@ -603,7 +617,8 @@ class Window(QMainWindow):
         if hasattr(self,'fan_editor_state'):self.fan_editor_state(kind)
     def fan_editor_policy(self):
         policy=dict(kind=self.fan_editor_kind)
-        if self.fan_editor_kind=='Custom':policy.update(cpu=[s.value() for s in self.curve_spins[0]],gpu=[s.value() for s in self.curve_spins[1]],delay=self.curve_delay.value())
+        if self.fan_editor_kind=='Custom':
+            policy.update(stages=compact_stages(self.fan_stages), delay=self.curve_delay.value())
         return fan_policy(policy)
     def apply_fan_policy(self,save=False,activate=None):
         try:policy=self.fan_editor_policy()
@@ -616,47 +631,145 @@ class Window(QMainWindow):
     def load_fan_policy(self):
         policy=getattr(self,'saved_fan_policies',{}).get(str(self.fan_profile.currentData()),dict(kind='Auto'))
         self.set_fan_editor_kind(policy['kind'])
-        if policy['kind']=='Custom':
-            for spins,key in zip(self.curve_spins,('cpu','gpu')):
-                for spin,value in zip(spins,policy[key]):spin.setValue(value)
-            self.curve_delay.setValue(policy['delay'])
+        try:mode=int(self.fan_profile.currentData())
+        except (ValueError,TypeError):mode=1
+        if policy['kind']=='Custom' and policy.get('stages'):
+            self.fan_stages=normalize_stages(policy['stages'],mode)
+            self.curve_delay.setValue(int(policy.get('delay',2)))
         else:
-            try:mode=int(self.fan_profile.currentData())
-            except (ValueError,TypeError):mode=1
-            for channel,spins in enumerate(self.curve_spins):
-                defaults=default_curve(mode,gpu=bool(channel))
-                for spin,value in zip(spins,defaults):spin.setValue(value)
+            self.fan_stages=default_stages(mode)
             self.curve_delay.setValue(2)
+        if hasattr(self,'refresh_fan_graph'):
+            self.refresh_fan_graph()
+
     def apply_boost_setting(self, enabled):
         mode = str(self.power_profile.currentData())
         if str(self.power_profile.currentData()) == str(self._confirmed_profile):
             self.apply('cpu_boost', enabled)
-        # Also update current policy in editor if saved
         if mode in getattr(self, 'saved_power_policies', {}):
             self.saved_power_policies[mode]['boost'] = enabled
             self.settings.setValue('power_policies', json.dumps(self.saved_power_policies))
             self.apply('power_policy', dict(mode=mode, policy=self.saved_power_policies[mode]))
 
-    def apply_power_policy(self,save=False):
-        boost_attr = getattr(self, 'cpu_boost', None)
+    def refresh_prochot_ui(self):
+        from cpu_prochot import CpuProchot
+        snap = CpuProchot().read()
+        locked = bool(self.settings.value('factory_prochot_locked', False, type=bool)) if snap is None else snap.locked
+        if snap is None:
+            self.prochot_activation.setText('PROCHOT N/A')
+            self.tjmax_label.setText('Tj-Max —')
+            self.prochot_offset.setEnabled(False)
+            self.prochot_switch.setEnabled(False)
+            self.prochot_switch.blockSignals(True); self.prochot_switch.setChecked(False); self.prochot_switch.blockSignals(False)
+            return
+        if self.settings.value('factory_prochot_offset', None) is None:
+            self.settings.setValue('factory_prochot_offset', snap.offset_celsius)
+            self.settings.setValue('factory_prochot_locked', snap.locked)
+            self.settings.setValue('factory_tjmax', snap.tjmax_celsius)
+        offset = self.settings.value('prochot_offset', None)
         try:
-            fields = dict(pl1=self.power_pl1.value(),pl2=self.power_pl2.value(),tau=self.power_tau.currentData())
-            if boost_attr is not None and hasattr(boost_attr, 'isChecked') and type(boost_attr.isChecked()) is bool:
-                fields['boost'] = boost_attr.isChecked()
-            policy=power_policy(fields)
-        except ValueError as exc:self.report_error(str(exc));return
+            offset = int(offset) if offset is not None else snap.offset_celsius
+        except (TypeError, ValueError):
+            offset = snap.offset_celsius
+        self.prochot_offset.spin.blockSignals(True)
+        self.prochot_offset.setValue(offset)
+        self.prochot_offset.spin.blockSignals(False)
+        label = f'PROCHOT {snap.tjmax_celsius - offset}°C'
+        if locked:
+            label += ' - Locked'
+        self.prochot_activation.setText(label)
+        self.tjmax_label.setText(f'Tj-Max {snap.tjmax_celsius}°C')
+        tuning_on = bool(getattr(self, 'tuning_enabled_row', None) and self.tuning_enabled_row.isChecked())
+        can_toggle = (not locked) and tuning_on
+        self.prochot_switch.setEnabled(can_toggle)
+        want = False if locked else bool(self.settings.value('apply_prochot', False, type=bool))
+        self.prochot_switch.blockSignals(True); self.prochot_switch.setChecked(want); self.prochot_switch.blockSignals(False)
+        def on_prochot_toggle(on):
+            self.prochot_offset.setEnabled(bool(on) and can_toggle)
+            if on and self.settings.value('prochot_offset', None) is None:
+                self.settings.setValue('prochot_offset', self.prochot_offset.value())
+        try: self.prochot_switch.toggled.disconnect()
+        except TypeError: pass
+        self.prochot_switch.toggled.connect(on_prochot_toggle)
+        on_prochot_toggle(self.prochot_switch.isChecked())
+
+    def apply_power_policy(self,save=False):
+        if hasattr(self,'tuning_enabled_row') and not self.tuning_enabled_row.isChecked():
+            self.report_error('Enable Tuning first'); return
+        apply_cpu=getattr(self,'apply_cpu_switch',None) is None or self.apply_cpu_switch.isChecked()
+        apply_gpu=getattr(self,'apply_gpu_switch',None) is not None and self.apply_gpu_switch.isChecked()
+        apply_prochot=getattr(self,'prochot_switch',None) is not None and self.prochot_switch.isChecked()
         mode=str(self.power_profile.currentData())
-        if save:
-            self.saved_power_policies[mode]=policy
-            self.settings.setValue('power_policies',json.dumps(self.saved_power_policies))
-        self.apply('power_policy',dict(mode=mode,policy=policy))
+        if apply_prochot:
+            try:
+                offset=int(self.prochot_offset.value())
+            except (TypeError, ValueError):
+                self.report_error('Enter a PROCHOT offset, or turn its switch off.'); return
+            if save:
+                self.settings.setValue('prochot_offset', offset)
+                self.settings.setValue('apply_prochot', True)
+            self.apply('cpu_prochot', offset)
+        elif save:
+            self.settings.setValue('apply_prochot', False)
+        if apply_cpu:
+            boost_attr = getattr(self, 'cpu_boost', None)
+            try:
+                fields = dict(pl1=self.power_pl1.value(),pl2=self.power_pl2.value(),tau=self.power_tau.currentData())
+                if boost_attr is not None and hasattr(boost_attr, 'isChecked') and type(boost_attr.isChecked()) is bool:
+                    fields['boost'] = boost_attr.isChecked()
+                policy=power_policy(fields)
+            except ValueError as exc:self.report_error(str(exc));return
+            if save:
+                self.saved_power_policies[mode]=policy
+                self.settings.setValue('power_policies',json.dumps(self.saved_power_policies))
+            self.apply('power_policy',dict(mode=mode,policy=policy))
+        elif save:
+            self.saved_power_policies.pop(mode, None)
+            self.settings.setValue('power_policies', json.dumps(self.saved_power_policies))
+        if apply_gpu and getattr(self, 'gpu_offsets_available', False) and hasattr(self, 'gpu_ct'):
+            gpu = dict(mode=int(mode), ct=self.gpu_ct.value(), db=self.gpu_db.value(), cp=self.gpu_cp.value())
+            if save:
+                self.saved_gpu_policies[mode]=dict(ct=gpu['ct'], db=gpu['db'], cp=gpu['cp'])
+                self.settings.setValue('gpu_policies', json.dumps(self.saved_gpu_policies))
+            self.apply('gpu_offsets', gpu)
+        elif save:
+            self.saved_gpu_policies.pop(mode, None)
+            self.settings.setValue('gpu_policies', json.dumps(self.saved_gpu_policies))
+        if not apply_cpu and not apply_gpu and not apply_prochot:
+            self.report_error('Turn on CPU limits, GPU limits, or PROCHOT first.')
     def reset_power_policy(self):
         mode=str(self.power_profile.currentData())
         self.saved_power_policies.pop(mode,None);self.settings.setValue('power_policies',json.dumps(self.saved_power_policies))
+        self.saved_gpu_policies.pop(mode, None)
+        self.settings.setValue('gpu_policies', json.dumps(self.saved_gpu_policies))
+        factory=self.settings.value('factory_prochot_offset', None)
+        if factory is not None:
+            try:
+                self.prochot_offset.setValue(int(factory))
+                self.settings.setValue('prochot_offset', int(factory))
+            except (TypeError, ValueError):
+                pass
+        self.settings.setValue('apply_prochot', False)
+        if hasattr(self, 'prochot_switch'):
+            self.prochot_switch.blockSignals(True); self.prochot_switch.setChecked(False); self.prochot_switch.blockSignals(False)
+        if hasattr(self, 'apply_cpu_switch'):
+            self.apply_cpu_switch.blockSignals(True); self.apply_cpu_switch.setChecked(False); self.apply_cpu_switch.blockSignals(False)
+        if hasattr(self, 'apply_gpu_switch'):
+            self.apply_gpu_switch.blockSignals(True); self.apply_gpu_switch.setChecked(False); self.apply_gpu_switch.blockSignals(False)
+        if factory is not None and not bool(self.settings.value('factory_prochot_locked', False, type=bool)):
+            try: self.apply('cpu_prochot', int(factory))
+            except (TypeError, ValueError): pass
         self.apply('reset_power_policy',int(mode))
         self.load_power_policy()
+        if hasattr(self, 'refresh_prochot_ui'):
+            self.refresh_prochot_ui()
     def load_power_policy(self):
-        policy=getattr(self,'saved_power_policies',{}).get(str(self.power_profile.currentData()))
+        mode=str(self.power_profile.currentData())
+        policy=getattr(self,'saved_power_policies',{}).get(mode)
+        if hasattr(self, 'apply_cpu_switch'):
+            self.apply_cpu_switch.blockSignals(True)
+            self.apply_cpu_switch.setChecked(policy is not None)
+            self.apply_cpu_switch.blockSignals(False)
         if not policy:
             from cpu_tuning import observed_policy
             calibration=Calibrator()
@@ -679,9 +792,31 @@ class Window(QMainWindow):
             self.tau_slider.slider.blockSignals(True);self.tau_slider.setValue(max(0,self.power_tau.currentIndex()));self.tau_slider.slider.blockSignals(False)
             self.tau_slider.label_value.setText(self.power_tau.currentText())
         self._cpu_editor_initial=(self.power_pl1.value(),self.power_pl2.value(),self.power_tau.currentData())
+        if hasattr(self, 'gpu_ct'):
+            saved = getattr(self, 'saved_gpu_policies', {}).get(mode)
+            if hasattr(self, 'apply_gpu_switch'):
+                self.apply_gpu_switch.blockSignals(True)
+                self.apply_gpu_switch.setChecked(bool(saved) and getattr(self, 'gpu_offsets_available', False))
+                self.apply_gpu_switch.blockSignals(False)
+            live = None
+            try:
+                from gpu_offsets import GpuOffsets
+                live = GpuOffsets().read(int(self.power_profile.currentData()))
+            except (OSError, TypeError, ValueError):
+                live = None
+            values = saved or live or dict(ct=0, db=0, cp=0)
+            self.gpu_ct.setValue(int(values.get('ct', 0)))
+            self.gpu_db.setValue(int(values.get('db', 0)))
+            self.gpu_cp.setValue(int(values.get('cp', 0)))
+            if hasattr(self, 'refresh_gpu_nominal'):
+                self.refresh_gpu_nominal()
+        if hasattr(self, 'apply_cpu_switch'):
+            self.apply_cpu_switch.toggled.emit(self.apply_cpu_switch.isChecked())
+        if hasattr(self, 'apply_gpu_switch'):
+            self.apply_gpu_switch.toggled.emit(self.apply_gpu_switch.isChecked())
     def apply_curve(self):
-        args = dict(cpu=[s.value() for s in self.curve_spins[0]],gpu=[s.value() for s in self.curve_spins[1]],delay=self.curve_delay.value())
-        try: FanCurve(**args)
+        args = dict(stages=compact_stages(self.fan_stages), delay=self.curve_delay.value())
+        try: FanCurve(stages=args['stages'], delay=args['delay'])
         except ValueError as exc:
             self.report_error(str(exc)); return
         self.settings.setValue('fan_curve',json.dumps(args))

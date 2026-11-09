@@ -107,11 +107,11 @@ def default_config():
             'TextOpacityPercent': 100,
             'PositionHorizontal': 'Left',
             'PositionVertical': 'Top',
+            'CornerRadiusPixels': 6,
             'Slots': [
                 {'CpuMetric': 'Usage', 'GpuMetric': 'Usage', 'ShowGraph': False},
                 {'CpuMetric': 'Temperature', 'GpuMetric': 'Temperature', 'ShowGraph': False},
                 {'CpuMetric': 'Effective Clock', 'GpuMetric': 'Clock', 'ShowGraph': False},
-                {'CpuMetric': 'Voltage', 'GpuMetric': 'None', 'ShowGraph': False},
                 {'CpuMetric': 'Power', 'GpuMetric': 'Power', 'ShowGraph': True},
                 {'CpuMetric': 'Memory', 'GpuMetric': 'Memory', 'ShowGraph': False},
                 {'CpuMetric': 'Memory Speed', 'GpuMetric': 'Memory Speed', 'ShowGraph': False},
@@ -303,6 +303,10 @@ class ConfigStore:
             ov['PositionHorizontal'] = str(val('hud_h_pos', 'Left'))
         if has('hud_v_pos'):
             ov['PositionVertical'] = str(val('hud_v_pos', 'Top'))
+        if has('hud_corner_radius'):
+            ov['CornerRadiusPixels'] = int(val('hud_corner_radius', 6))
+        elif has('overlay_corner_radius'):
+            ov['CornerRadiusPixels'] = int(val('overlay_corner_radius', 6))
         slot_count = int(val('overlay_slot_count', len(ov.get('Slots') or []))) if has('overlay_slot_count') else len(ov.get('Slots') or [])
         slots = []
         for i in range(max(slot_count, len(ov.get('Slots') or []))):
@@ -461,6 +465,8 @@ class JsonSettings:
             return ov.get('PositionHorizontal', 'Left')
         if key == 'hud_v_pos':
             return ov.get('PositionVertical', 'Top')
+        if key in ('hud_corner_radius', 'overlay_corner_radius'):
+            return int(ov.get('CornerRadiusPixels', 6))
         if key == 'hud_position':
             return f"{ov.get('PositionVertical', 'Top')} {ov.get('PositionHorizontal', 'Left').lower()}"
         if key == 'brightness':
@@ -551,6 +557,8 @@ class JsonSettings:
             ov['PositionHorizontal'] = str(value); return
         if key == 'hud_v_pos':
             ov['PositionVertical'] = str(value); return
+        if key in ('hud_corner_radius', 'overlay_corner_radius'):
+            ov['CornerRadiusPixels'] = int(value); return
         if key == 'brightness':
             lit['Brightness'] = int(value); return
         if key == 'speed':

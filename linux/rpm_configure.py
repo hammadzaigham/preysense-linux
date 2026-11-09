@@ -18,7 +18,9 @@ def configure(user):
     subprocess.run(['systemctl','daemon-reload'],check=True)
     # Do not unload/reload a loaded module or disturb an active fan controller.
     subprocess.run(['systemctl','start','preysense-hardware.service'],check=True)
-    subprocess.run(['/opt/preysense/hardware-permissions.sh',group],check=True)
+    perm_script = Path('/usr/lib/preysense/hardware-permissions.sh')
+    if not perm_script.exists(): perm_script = Path('/opt/preysense/hardware-permissions.sh')
+    subprocess.run([str(perm_script),group],check=True)
     subprocess.run(['udevadm','control','--reload-rules'],check=True)
     subprocess.run(['udevadm','trigger','--subsystem-match=hidraw'],check=True)
     from service_lifecycle import configure as configure_services

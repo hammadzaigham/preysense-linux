@@ -5,6 +5,6 @@ GenericName=Acer Control Center
 Comment=Control your Acer laptop
 Keywords=acer;predator;preysense;prey;sense;
 Exec=preysense
-Icon=/opt/preysense/linux/assets/appicon.svg
+Icon=preysense
 Categories=Settings;HardwareSettings;
 Terminal=false

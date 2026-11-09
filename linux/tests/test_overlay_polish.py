@@ -26,7 +26,8 @@ class OverlayPolishTests(unittest.TestCase):
             settings = QSettings(str(Path(directory)/'prefs'), QSettings.IniFormat)
             h = HardwareOverlay(settings)
             self.assertEqual(tuple(h.columns), DEFAULT_COLUMNS)
-            self.assertEqual(h.column_graphs, [False, False, False, False, True, False, False])
+            self.assertEqual(len(h.columns), 6)
+            self.assertEqual(h.column_graphs, [False, False, False, True, False, False])
             original_width = h._measure_layout(2)['width']
             self.assertTrue(h.add_slot('Fan Speed', 'None', True))
             self.assertGreater(h._measure_layout(2)['width'], original_width)
@@ -72,6 +73,20 @@ class OverlayPolishTests(unittest.TestCase):
             h.configure('background', 0); h.configure('alpha', 0)
             image = h.grab().toImage()
             self.assertTrue(all(image.pixelColor(x,y).alpha() == 0 for x,y in ((0,0),(20,20),(image.width()-1,image.height()-1))))
+            h.close()
+
+    def test_overlay_rounded_corners_translucent(self):
+        with tempfile.TemporaryDirectory() as directory:
+            h = HardwareOverlay(QSettings(str(Path(directory)/'prefs'), QSettings.IniFormat))
+            h.show()
+            image = h.grab().toImage()
+            # Antialiased rounded corners: corner pixel (0,0) must have alpha 0
+            self.assertEqual(image.pixelColor(0, 0).alpha(), 0)
+            self.assertEqual(image.pixelColor(image.width() - 1, 0).alpha(), 0)
+            self.assertEqual(image.pixelColor(0, image.height() - 1).alpha(), 0)
+            self.assertEqual(image.pixelColor(image.width() - 1, image.height() - 1).alpha(), 0)
+            # Interior is opaque or filled to configured bg_alpha
+            self.assertGreater(image.pixelColor(20, 20).alpha(), 0)
             h.close()
 
 if __name__ == '__main__': unittest.main()

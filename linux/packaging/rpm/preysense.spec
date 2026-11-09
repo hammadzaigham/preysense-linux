@@ -35,18 +35,20 @@ No firmware or NVIDIA driver files are bundled.
 %build
 
 %install
-install -d %{buildroot}/opt/preysense/linux/assets %{buildroot}/opt/preysense/linux/assets/Resources
-install -m 644 linux/*.py %{buildroot}/opt/preysense/linux/
-install -m 644 linux/assets/*.svg linux/assets/*.json %{buildroot}/opt/preysense/linux/assets/
-cp -a linux/kwin %{buildroot}/opt/preysense/linux/
-install -m 644 linux/assets/Resources/*.png linux/assets/Resources/Font.otf %{buildroot}/opt/preysense/linux/assets/Resources/
-install -m 644 linux/assets/appicon.svg %{buildroot}/opt/preysense/linux/assets/
-install -m 755 linux/hardware-permissions.sh %{buildroot}/opt/preysense/hardware-permissions.sh
-install -m 755 linux/sign-driver.sh %{buildroot}/opt/preysense/linux/sign-driver.sh
-install -d %{buildroot}/opt/preysense/docs/linux %{buildroot}/opt/preysense/licenses
-install -m 644 docs/linux/*.md %{buildroot}/opt/preysense/docs/linux/
-install -m 644 LICENSE %{buildroot}/opt/preysense/licenses/MIT
-install -m 644 linux/kernel/COPYING %{buildroot}/opt/preysense/licenses/GPL-2.0
+install -d %{buildroot}/usr/lib/preysense/assets %{buildroot}/usr/lib/preysense/assets/Resources
+install -m 644 linux/*.py %{buildroot}/usr/lib/preysense/
+rm -f %{buildroot}/usr/lib/preysense/documentation_ui.py
+install -m 644 linux/assets/*.svg linux/assets/*.json %{buildroot}/usr/lib/preysense/assets/
+cp -a linux/kwin %{buildroot}/usr/lib/preysense/
+install -m 644 linux/assets/Resources/*.png linux/assets/Resources/Font.otf %{buildroot}/usr/lib/preysense/assets/Resources/
+install -m 644 linux/assets/appicon.svg %{buildroot}/usr/lib/preysense/assets/
+install -m 755 linux/hardware-permissions.sh %{buildroot}/usr/lib/preysense/hardware-permissions.sh
+install -m 755 linux/sign-driver.sh %{buildroot}/usr/lib/preysense/sign-driver.sh
+install -d %{buildroot}/usr/share/licenses/%{name}
+install -m 644 LICENSE %{buildroot}/usr/share/licenses/%{name}/LICENSE
+install -m 644 linux/kernel/COPYING %{buildroot}/usr/share/licenses/%{name}/GPL-2.0
+install -d %{buildroot}/usr/share/icons/hicolor/scalable/apps
+install -m 644 linux/assets/appicon.svg %{buildroot}/usr/share/icons/hicolor/scalable/apps/preysense.svg
 install -d %{buildroot}/usr/src/preysense-2.5.0
 install -m 644 linux/kernel/preysense.c linux/kernel/Makefile linux/kernel/dkms.conf linux/kernel/COPYING %{buildroot}/usr/src/preysense-2.5.0/
 install -D -m 755 linux/packaging/rpm/preysense %{buildroot}/usr/bin/preysense
@@ -69,7 +71,7 @@ if ! dkms build -m preysense -v 2.5.0 -k "$(uname -r)" --force; then
 elif ! dkms install -m preysense -v 2.5.0 -k "$(uname -r)" --force; then
     echo 'PreySense driver installation failed. Run dkms status for details.' >&2
 fi
-python3 -I /opt/preysense/linux/keymap.py save || :
+python3 -I /usr/lib/preysense/keymap.py save || :
 systemd-hwdb update || :
 udevadm control --reload-rules || :
 echo 'Run preysense-setup as the desktop user to finish hardware access and driver setup.'
@@ -77,8 +79,8 @@ echo 'Run preysense-setup as the desktop user to finish hardware access and driv
 %preun
 if [ "$1" -eq 0 ]; then
     systemctl disable --now preysense-hardware.service || :
-    python3 -I /opt/preysense/linux/keymap.py restore || :
-    python3 -I /opt/preysense/linux/rpm_configure.py --remove || :
+    python3 -I /usr/lib/preysense/keymap.py restore || :
+    python3 -I /usr/lib/preysense/rpm_configure.py --remove || :
     dkms remove -m preysense -v 2.5.0 --all || :
     # Purge user settings and autostart shortcuts across real user accounts
     for home_dir in /home/*; do
@@ -97,7 +99,9 @@ udevadm trigger --subsystem-match=input || :
 udevadm trigger --subsystem-match=hidraw || :
 
 %files
-/opt/preysense
+/usr/lib/preysense
+/usr/share/licenses/%{name}
+/usr/share/icons/hicolor/scalable/apps/preysense.svg
 /usr/src/preysense-2.5.0
 /usr/bin/preysense
 /usr/bin/preysense-setup

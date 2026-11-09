@@ -104,7 +104,7 @@ def build_platform_windows(window):
     window._row_theme = row_theme
 
     # Separator
-    _separator(s_layout)
+    # Note: separator above battery limit removed per UI polish request
 
     # E. Battery Limit (80% / 100%)
     bat_val = int(window.settings.value("battery_limit", 80)) if hasattr(window, "settings") else 80
@@ -130,8 +130,8 @@ def build_platform_windows(window):
             window.apply("usb_charging",value)
         row_usb.slider.sliderReleased.connect(commit_usb)
     s_layout.addWidget(row_usb)
-    row_usb.label_value.setText('Off' if row_usb.value()==0 else f'{row_usb.value()}%')
-    row_usb.valueChanged.connect(lambda value:row_usb.label_value.setText('Off' if value==0 else f'{value}%'))
+    row_usb.label_value.setText('Disabled' if row_usb.value()==0 else f'{row_usb.value()}%')
+    row_usb.valueChanged.connect(lambda value:row_usb.label_value.setText('Disabled' if value==0 else f'{value}%'))
     window._row_usb = row_usb
 
     # ── 2. ADVANCED / POWER PROFILES & ACPI (AdvancedWindow.xaml) ─────────
@@ -205,6 +205,6 @@ def update_platform_windows(window, data):
             val = int(data["usb_charging"])
             window._row_usb.slider.blockSignals(True)
             window._row_usb.setValue(val)
-            window._row_usb.label_value.setText("Off" if val==0 else f"{val}%")
+            window._row_usb.label_value.setText("Disabled" if val==0 else f"{val}%")
             window._row_usb.slider.blockSignals(False)
         except (ValueError, TypeError): pass

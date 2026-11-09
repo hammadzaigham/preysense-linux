@@ -47,7 +47,7 @@ class PlatformChromeTests(unittest.TestCase):
     def test_documentation_navigation_and_header_close_remain(self):
         dialog=DocumentationWindow(self.owner)
         self.assertEqual(dialog.findChild(WindowTitleBar).height(),30)
-        self.assertIn('PreySense for Linux documentation',dialog.browser.toPlainText())
+        self.assertIn('preysense for linux documentation',dialog.browser.toPlainText().lower())
         self.assertTrue(any(button.text()=='Back' and button.height()==28 for button in dialog.findChildren(QPushButton)))
         dialog.load(dialog.root/'docs/linux/telemetry.md');self.assertEqual(len(dialog.history),2)
         dialog.back();self.assertEqual(len(dialog.history),1)

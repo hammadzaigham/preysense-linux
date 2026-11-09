@@ -2,7 +2,7 @@
 import os,subprocess,pwd,json
 from pathlib import Path
 UNITS=('preysense-hardware.service',)
-CONFIG=Path('/opt/preysense/linux/service-lifecycle.json')
+CONFIG=Path('/usr/lib/preysense/service-lifecycle.json') if Path('/usr/lib/preysense').exists() else Path('/opt/preysense/linux/service-lifecycle.json')
 
 def marker():return Path(os.environ.get('XDG_RUNTIME_DIR',f'/run/user/{os.getuid()}'))/'preysense-running'
 
@@ -36,11 +36,13 @@ def configure(user):
         '      '+json.dumps(list(UNITS))+'.indexOf(action.lookup("unit")) !== -1 &&\n'
         '      ["start", "stop"].indexOf(action.lookup("verb")) !== -1) { return polkit.Result.YES; }\n});\n')
     rules.chmod(0o644)
+    CONFIG=Path('/usr/lib/preysense/service-lifecycle.json') if Path('/usr/lib/preysense').exists() else Path('/opt/preysense/linux/service-lifecycle.json')
     CONFIG.write_text(json.dumps({'uid':account.pw_uid}))
     CONFIG.chmod(0o644)
 
 def cleanup():
-    CONFIG.unlink(missing_ok=True)
+    for cfg in (Path('/usr/lib/preysense/service-lifecycle.json'), Path('/opt/preysense/linux/service-lifecycle.json')):
+        cfg.unlink(missing_ok=True)
     for unit in UNITS:
         p=Path('/etc/systemd/system')/(unit+'.d')/'startup-preference.conf';p.unlink(missing_ok=True)
     Path('/etc/polkit-1/rules.d/49-preysense-services.rules').unlink(missing_ok=True)

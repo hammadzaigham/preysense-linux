@@ -187,7 +187,10 @@ class Worker(QObject):
                 if power:
                     limits = {k: v for k, v in power.items() if k != 'boost'}
                     self.power_ownership.apply(**limits)
-                    if 'boost' in power:self.cpu_power.set_boost(power['boost'])
+                    boost_setting = power.get('boost', True)
+                    self.cpu_power.set_boost(boost_setting)
+                else:
+                    self.cpu_power.set_boost(True)
                 data['cpu_power']=self.cpu_power.snapshot()
                 self.cpu_dirty=False
             if self.curve and sample:
@@ -415,6 +418,8 @@ class Window(QMainWindow):
         self.auto_hidden_windows=[]
         for effect in (Qt.UI_AnimateMenu, Qt.UI_FadeMenu, Qt.UI_AnimateCombo, Qt.UI_AnimateTooltip, Qt.UI_FadeTooltip, Qt.UI_AnimateToolBox):
             QApplication.setEffectEnabled(effect, False)
+        self.thread = QThread(self)
+        self.worker = Worker()
         legacy = QSettings('PreySense', 'Linux')
         self.config_store = getattr(self.worker, 'config_store', None) or ConfigStore()
         self.settings = JsonSettings(self.config_store)
@@ -424,8 +429,6 @@ class Window(QMainWindow):
         icon = Path(__file__).resolve().parent / 'assets/appicon.svg'
         self.setWindowIcon(QIcon(str(icon)))
         self.colors = [QColor(c) for c in self.settings.value('colors', ['#28d8ca']*4)]
-        self.thread = QThread(self)
-        self.worker = Worker()
         self._calibration_needed=not self.worker.calibration_enabled
         self.worker.moveToThread(self.thread)
         self.thread.started.connect(self.worker.start)
@@ -557,7 +560,7 @@ class Window(QMainWindow):
         for name,title,choices in [
             ('boot_sound','Boot sound',[('Off',0),('On',1)]),
             ('led_timeout','Keyboard lighting timeout',[('Never',0),('30 seconds',30)]),
-            ('usb_charging','USB charging when powered off',[('Off',0),('Until battery 10%',10),('Until battery 20%',20),('Until battery 30%',30)]),
+            ('usb_charging','USB charging when powered off',[('Disabled',0),('Until battery 10%',10),('Until battery 20%',20),('Until battery 30%',30)]),
             ('lcd_overdrive','LCD overdrive',[('Off',0),('On',1)])]:
             row = QHBoxLayout(); row.addWidget(QLabel(title)); combo = QComboBox()
             for text,value in choices: combo.addItem(text,value)
@@ -751,8 +754,14 @@ class Window(QMainWindow):
         if hasattr(self,'tuning_enabled_row') and not self.tuning_enabled_row.isChecked():
             self.report_error('Enable Tuning first'); return
         apply_cpu=getattr(self,'apply_cpu_switch',None) is None or self.apply_cpu_switch.isChecked()
-        apply_gpu=getattr(self,'apply_gpu_switch',None) is not None and self.apply_gpu_switch.isChecked()
-        apply_prochot=getattr(self,'prochot_switch',None) is not None and self.prochot_switch.isChecked()
+        apply_gpu=(getattr(self,'apply_gpu_switch',None) is not None and
+                   self.apply_gpu_switch.isChecked() and
+                   bool(getattr(self,'gpu_offsets_available',False) is True) and
+                   'Mock' not in type(getattr(self,'gpu_ct',None)).__name__)
+        apply_prochot=(getattr(self,'prochot_switch',None) is not None and
+                       self.prochot_switch.isChecked() and
+                       hasattr(self,'prochot_offset') and
+                       'Mock' not in type(self.prochot_offset).__name__)
         mode=str(self.power_profile.currentData())
         if apply_prochot:
             try:
@@ -1034,11 +1043,16 @@ def main():
         server.newConnection.connect(activate)
     # Hide to tray when focus leaves PreySense (matching Windows App.xaml.cs Deactivated behavior)
     def on_focus_changed(old, now):
-        if now is None and window.isVisible():
+        try:
+            if not window.isVisible():
+                return
+        except RuntimeError:
+            return
+        if now is None:
             # Check if any window belonging to PreySense (excluding the overlay) is active
             active = QApplication.activeWindow()
-            if active is None or active is window.overlay:
-                QTimer.singleShot(150, lambda: window.toggle_window() if window.isVisible() and QApplication.activeWindow() in (None, window.overlay) else None)
+            if active is None or active is getattr(window, 'overlay', None):
+                QTimer.singleShot(150, lambda: window.toggle_window() if not getattr(window, 'quitting', True) and window.isVisible() and QApplication.activeWindow() in (None, getattr(window, 'overlay', None)) else None)
     app.focusChanged.connect(on_focus_changed)
     if not args.tray or not window.tray.isVisible(): window.show()
     if not args.smoke_test:

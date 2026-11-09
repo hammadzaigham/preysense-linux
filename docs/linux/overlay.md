@@ -2,8 +2,8 @@
 
 The native Qt HUD follows the Windows two-row CPU/GPU design with dynamic
 add/remove slots, optional blue/green filled graphs and 60-sample histories.
-Default slots: Usage, Temperature, Effective Clock/Clock, CPU VID, Power (graph),
-Memory, Memory Speed. Fan Speed remains available from the menus.
+Default slots: Usage, Temperature, Effective Clock/Clock, Power (graph),
+Memory, Memory Speed. CPU VID and Fan Speed remain available from the menus.
 
 CPU Voltage is MSR-reported VID (IA32_PERF_STATUS via `cpu_vid_mv` sysfs), not
 measured Vcore. FPS, GPU Voltage, Hotspot, Memory Temperature, and PerfCap are

@@ -25,9 +25,9 @@ class UiPreferencesTests(unittest.TestCase):
    self.assertNotIsInstance(combo.itemDelegate(),TranslationDelegate)
  def test_usb_zero_is_off_for_edit_and_telemetry(self):
   build_platform_windows(self.owner);row=self.owner._row_usb
-  self.assertEqual(row.label_value.text(),'Off')
+  self.assertEqual(row.label_value.text(),'Disabled')
   row.setValue(10);self.assertEqual(row.label_value.text(),'10%')
-  update_platform_windows(self.owner,{'usb_charging':'0'});self.assertEqual(row.label_value.text(),'Off')
+  update_platform_windows(self.owner,{'usb_charging':'0'});self.assertEqual(row.label_value.text(),'Disabled')
  def test_tooltip_changes_are_cleared(self):
   install_no_tooltips(self.app);widget=QWidget();widget.setToolTip('hidden');self.assertEqual(widget.toolTip(),'');widget.close()
  def test_fan_graph_left_edge_is_40_degrees(self):

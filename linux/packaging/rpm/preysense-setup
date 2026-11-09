@@ -1,9 +1,9 @@
 #!/bin/sh
 set -eu
 if [ "$(id -u)" = 0 ]; then echo 'Run preysense-setup as the desktop user.' >&2; exit 1; fi
-sudo /usr/bin/python3 -I /opt/preysense/linux/rpm_configure.py "$(id -un)"
-if [ -x /opt/preysense/linux/sign-driver.sh ]; then
+sudo /usr/bin/python3 -I /usr/lib/preysense/rpm_configure.py "$(id -un)"
+if [ -x /usr/lib/preysense/sign-driver.sh ]; then
     echo 'Checking kernel module signing and Secure Boot status...'
-    sudo /opt/preysense/linux/sign-driver.sh || echo 'Kernel module signing helper exited with an error. Review output above.' >&2
+    sudo /usr/lib/preysense/sign-driver.sh || echo 'Kernel module signing helper exited with an error. Review output above.' >&2
 fi
 echo 'PreySense hardware permissions and driver signing checks are complete.'

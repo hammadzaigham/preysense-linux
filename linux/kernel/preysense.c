@@ -15,6 +15,13 @@
 #include <linux/delay.h>
 #include <asm/msr.h>
 
+#ifndef rdmsrl_safe
+#define rdmsrl_safe(msr, p) rdmsrq_safe(msr, p)
+#endif
+#ifndef wrmsrl_safe
+#define wrmsrl_safe(msr, val) wrmsrq_safe(msr, val)
+#endif
+
 #define GAMING_GUID "7A4DDFE7-5B5D-40B4-8595-4408E0CC7F56"
 static DEFINE_MUTEX(gate);
 static struct platform_device *pdev;
@@ -428,7 +435,9 @@ static DEVICE_ATTR_RO(cpu_vid_mv);
  * Show: "offset tjmax locked". Store: offset 0–63. Preserves other TEMPERATURE_TARGET bits.
  */
 #define MSR_TEMPERATURE_TARGET 0x1A2ULL
+#ifndef MSR_PLATFORM_INFO
 #define MSR_PLATFORM_INFO 0xCEULL
+#endif
 #define PROCHOT_OFFSET_MASK (0x3FULL << 24)
 #define PROCHOT_LOCK_BIT BIT_ULL(31)
 
@@ -454,7 +463,7 @@ static ssize_t cpu_prochot_show(struct device *dev, struct device_attribute *a, 
 static ssize_t cpu_prochot_store(struct device *dev, struct device_attribute *a, const char *buf, size_t count)
 {
 	unsigned int offset;
-	u64 platform, original, desired, actual, current;
+	u64 platform, original, desired, actual, curr;
 	int err, target;
 	char extra;
 
@@ -499,11 +508,11 @@ static ssize_t cpu_prochot_store(struct device *dev, struct device_attribute *a,
 		goto out;
 	}
 	/* Rejected write may still have changed the register — restore offset only. */
-	if (!rdmsrl_safe(MSR_TEMPERATURE_TARGET, &current)) {
-		if ((current & PROCHOT_OFFSET_MASK) != (original & PROCHOT_OFFSET_MASK) &&
-		    !(current & PROCHOT_LOCK_BIT))
+	if (!rdmsrl_safe(MSR_TEMPERATURE_TARGET, &curr)) {
+		if ((curr & PROCHOT_OFFSET_MASK) != (original & PROCHOT_OFFSET_MASK) &&
+		    !(curr & PROCHOT_LOCK_BIT))
 			wrmsrl_safe(MSR_TEMPERATURE_TARGET,
-				    (current & ~PROCHOT_OFFSET_MASK) | (original & PROCHOT_OFFSET_MASK));
+				    (curr & ~PROCHOT_OFFSET_MASK) | (original & PROCHOT_OFFSET_MASK));
 	}
 	err = -EIO;
 out:

@@ -68,5 +68,23 @@ class ConfigStoreTests(unittest.TestCase):
         facade.setValue('power_policies', json.dumps({}))
         self.assertFalse(ConfigStore(self.path).data['Tuning']['Performance']['ApplyCpuLimits'])
 
+    def test_default_overlay_slots_and_corner_radius(self):
+        store = ConfigStore(self.path)
+        overlay = store.data['Overlay']
+        self.assertEqual(len(overlay['Slots']), 6)
+        expected = [
+            ('Usage', 'Usage'),
+            ('Temperature', 'Temperature'),
+            ('Effective Clock', 'Clock'),
+            ('Power', 'Power'),
+            ('Memory', 'Memory'),
+            ('Memory Speed', 'Memory Speed'),
+        ]
+        self.assertEqual([(s['CpuMetric'], s['GpuMetric']) for s in overlay['Slots']], expected)
+        self.assertEqual(overlay.get('CornerRadiusPixels'), 6)
+        facade = JsonSettings(store)
+        self.assertEqual(facade.value('overlay_slot_count'), 6)
+        self.assertEqual(facade.value('hud_corner_radius'), 6)
+
 
 if __name__=='__main__':unittest.main()

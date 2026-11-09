@@ -59,12 +59,11 @@ DEFAULT_COLUMNS = (
     ("Usage", "Usage"),
     ("Temperature", "Temperature"),
     ("Effective Clock", "Clock"),
-    ("Voltage", "None"),
     ("Power", "Power"),
     ("Memory", "Memory"),
     ("Memory Speed", "Memory Speed"),
 )
-DEFAULT_GRAPHS = (False, False, False, False, True, False, False)
+DEFAULT_GRAPHS = (False, False, False, True, False, False)
 LEGACY_CPU = {"P-Core": "Effective Clock", "E-Core": "None", "Max Core": "Usage", "P-Core Usage": "Usage", "E-Core Usage": "Usage"}
 LEGACY_GPU = {
     "Voltage": "None",
@@ -177,6 +176,7 @@ class HardwareOverlay(QWidget):
         self.h_pos = settings.value("hud_h_pos", "Left")
         self.v_pos = settings.value("hud_v_pos", "Top")
         self.position = settings.value("hud_position", "Top left")
+        self.corner_radius = int(settings.value("hud_corner_radius", settings.value("overlay_corner_radius", 6)))
         self.drag_start = None
         self.columns = []
         self.column_graphs = []
@@ -238,6 +238,9 @@ class HardwareOverlay(QWidget):
             if "left" in self.position.lower(): self.h_pos = "Left"
             elif "right" in self.position.lower(): self.h_pos = "Right"
             self.reposition()
+        elif key in ("corner_radius", "radius"):
+            self.corner_radius = max(0, min(32, int(value)))
+            self.settings.setValue("hud_corner_radius", self.corner_radius)
         self.update()
 
     def _measure_layout(self, sc):
@@ -335,8 +338,11 @@ class HardwareOverlay(QWidget):
         return {"cpu": sorted(cpu), "gpu": sorted(gpu), "visible": visible}
 
     def set_column(self, index, cpu, gpu, graph=None):
-        if not 0 <= index < len(self.columns) or cpu not in CPU_CHOICES or gpu not in GPU_CHOICES:
+        if not 0 <= index < MAX_OVERLAY_SLOTS or cpu not in CPU_CHOICES or gpu not in GPU_CHOICES:
             raise ValueError("Invalid overlay column")
+        while len(self.columns) <= index:
+            self.columns.append(("None", "None"))
+            self.column_graphs.append(False)
         self.columns[index] = (cpu, gpu)
         self.settings.setValue(f"overlay_col_{index+1}", f"{cpu}|{gpu}")
         if graph is not None:
@@ -485,16 +491,23 @@ class HardwareOverlay(QWidget):
         sc = layout["scale"]
         w, h = self.width(), self.height()
 
-        # 1. Background fill
+        # 1. Background fill and rounded shell matching Windows
         alpha = int(255 * (self.bg_alpha / 100.0))
-        p.fillRect(0, 0, w, h, QColor(0, 0, 0, alpha))
+        radius = float(self.corner_radius) * (sc / 2.0)
+        rect = QRectF(0.5, 0.5, w - 1.0, h - 1.0)
+        path = QPainterPath()
+        path.addRoundedRect(rect, radius, radius)
+        p.fillPath(path, QColor(0, 0, 0, alpha))
 
-        # 2. Glowing Borders matching HardwareOverlay.cs
+        # 2. Glowing Borders matching HardwareOverlay.cs clipped to rounded path
+        p.save()
+        p.setClipPath(path)
         p.fillRect(0, 0, w, int(1 * sc), self.background_color(OVERLAY_TOP_GLOW))
         p.fillRect(0, h - int(1 * sc), w, int(1 * sc), self.background_color(OVERLAY_BOTTOM_GLOW))
+        p.restore()
         p.setPen(QPen(self.background_color(OVERLAY_BORDER_COLOR), 1))
         p.setBrush(Qt.NoBrush)
-        p.drawRect(0, 0, w - 1, h - 1)
+        p.drawPath(path)
 
         # Typography
         text_a = int(255 * (self.text_alpha / 100.0))

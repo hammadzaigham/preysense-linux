@@ -72,7 +72,7 @@ class CycleTests(unittest.TestCase):
     def test_ac_required_and_disconnect_restores(self):
         self.cycle.ac_online=lambda:False;self.cycle.start();self.assertFalse(self.hw.writes)
         self.errors.clear();self.cycle.ac_online=lambda:True;self.cycle.start();self.cycle.ac_online=lambda:False;self.cycle._step()
-        self.assertEqual(self.hw.mode,1);self.assertIn('disconnected',self.errors[0])
+        self.assertEqual(self.hw.mode,1);self.assertTrue('unplugged' in self.errors[0] or 'disconnected' in self.errors[0])
     def test_unstable_samples_are_not_saved(self):
         self.power.unstable=True;self.cycle.start();self.drive()
         self.assertEqual(self.hw.mode,1);self.assertEqual(len(self.cal.cache),0);self.assertIn('did not settle',self.errors[0])

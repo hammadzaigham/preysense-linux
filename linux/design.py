@@ -465,7 +465,7 @@ def finish_control_windows(window):
     enable_row=SettingSwitchRow('Enable Tuning', checked=bool(window.settings.value('tuning_enabled', False, type=bool)))
     window.tuning_enabled_row=enable_row
     t.addWidget(enable_row)
-    sep=QFrame(); sep.setFrameShape(QFrame.HLine); sep.setObjectName('separator'); t.addWidget(sep)
+    sep=QFrame(); sep.setFixedHeight(1); sep.setProperty('preysenseSeparator', True); sep.setObjectName('separator'); t.addWidget(sep)
 
     prochot_block=QWidget(); prochot_l=QVBoxLayout(prochot_block); prochot_l.setContentsMargins(0,0,0,0); prochot_l.setSpacing(4)
     prochot_labels=QHBoxLayout(); window.prochot_activation=QLabel('PROCHOT —'); window.tjmax_label=QLabel('Tj-Max —')
@@ -482,7 +482,7 @@ def finish_control_windows(window):
     prochot_row.addWidget(window.prochot_offset,1); prochot_row.addWidget(window.prochot_switch)
     prochot_l.addLayout(prochot_row)
     t.addWidget(prochot_block)
-    sep2=QFrame(); sep2.setFrameShape(QFrame.HLine); sep2.setObjectName('separator'); t.addWidget(sep2)
+    sep2=QFrame(); sep2.setFixedHeight(1); sep2.setProperty('preysenseSeparator', True); sep2.setObjectName('separator'); t.addWidget(sep2)
 
     # Mode + scroll + footer gated by Enable Tuning (Windows Grid.Row 2).
     gated=QWidget(); gated_l=QVBoxLayout(gated); gated_l.setContentsMargins(0,0,0,0); gated_l.setSpacing(8)
@@ -499,8 +499,9 @@ def finish_control_windows(window):
 
     scroll=QScrollArea(); scroll.setWidgetResizable(True); scroll.setFrameShape(QFrame.NoFrame)
     scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+    scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
     body=QWidget(); body_l=QVBoxLayout(body); body_l.setContentsMargins(0,0,0,0); body_l.setSpacing(8)
-    scroll.setWidget(body); scroll.setMinimumHeight(320); gated_l.addWidget(scroll)
+    scroll.setWidget(body); gated_l.addWidget(scroll)
 
     # Linux only exposes on/off via intel_pstate no_turbo (not Windows PERFBOOSTMODE).
     boost_row=SettingSwitchRow('CPU Boost', checked=True)
@@ -620,11 +621,10 @@ def finish_control_windows(window):
                 window.load_power_policy()
         if hasattr(window, 'refresh_prochot_ui'):
             window.refresh_prochot_ui()
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         QDialog.showEvent(tuning,event)
+        tuning.resize(tuning.width(), tuning.sizeHint().height())
     tuning.showEvent=sync_tuning_on_show
     window.profile_editors_initialized=False
     if hasattr(window, 'refresh_prochot_ui'):
         window.refresh_prochot_ui()
-
-    from documentation_ui import DocumentationWindow
-    window.documentation=DocumentationWindow(window)

@@ -16,21 +16,29 @@ class ColorWheel(QWidget):
         self.setCursor(Qt.PointingHandCursor); self.setFocusPolicy(Qt.StrongFocus)
         self.setAccessibleName('Color wheel'); self.setAccessibleDescription('Hue and saturation; arrow keys change color')
     def wheel_geometry(self):
-        return QPointF(self.width() / 2, self.height() / 2), min(self.width(), self.height()) / 2 - 6
+        margin = 7
+        return QPointF(self.width() / 2, self.height() / 2), min(self.width(), self.height()) / 2 - margin
     def _image(self):
-        ratio = max(1, int(self.devicePixelRatioF())); size = 150 * ratio
-        if self.cache is not None and self.cache_ratio == ratio: return self.cache
-        image = QImage(size, size, QImage.Format_ARGB32_Premultiplied); image.fill(0); image.setDevicePixelRatio(ratio)
-        center, radius = QPointF(size / 2, size / 2), size / 2 - 6 * ratio
-        for y in range(size):
-            for x in range(size):
+        ratio = max(1, int(self.devicePixelRatioF()))
+        w, h = self.width(), self.height()
+        size_w, size_h = w * ratio, h * ratio
+        cache_key = (w, h, ratio)
+        if self.cache is not None and getattr(self, '_cache_key', None) == cache_key: return self.cache
+        image = QImage(size_w, size_h, QImage.Format_ARGB32_Premultiplied); image.fill(0); image.setDevicePixelRatio(ratio)
+        margin = 7 * ratio
+        center = QPointF(size_w / 2, size_h / 2)
+        radius = min(size_w, size_h) / 2 - margin
+        for y in range(size_h):
+            for x in range(size_w):
                 dx, dy = x - center.x(), y - center.y(); distance = math.hypot(dx, dy)
                 if distance > radius: continue
                 hue = (math.degrees(math.atan2(dy, dx)) + 360) % 360 / 360
                 saturation = distance / radius
                 r, g, b = colorsys.hsv_to_rgb(hue, saturation, 1)
                 image.setPixel(x, y, QColor.fromRgbF(r, g, b).rgb())
-        self.cache, self.cache_ratio = image, ratio; return image
+        self.cache = image
+        self._cache_key = cache_key
+        return image
     def paintEvent(self, event):
         painter = QPainter(self); painter.setRenderHint(QPainter.Antialiasing); painter.drawImage(0, 0, self._image())
         center, radius = self.wheel_geometry(); hue, saturation = self.color.hsvHueF(), self.color.hsvSaturationF()

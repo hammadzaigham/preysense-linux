@@ -750,9 +750,29 @@ class Window(QMainWindow):
         self.prochot_switch.toggled.connect(on_prochot_toggle)
         on_prochot_toggle(self.prochot_switch.isChecked())
 
+    def set_tuning_status(self, text, is_error=False):
+        status_label = getattr(self, 'tuning_status', None)
+        if status_label is not None:
+            if text:
+                color = '#ff6b6b' if is_error else '#5cdb95'
+                status_label.setStyleSheet(f'color: {color}; font-size: 12px; margin-top: 4px;')
+                status_label.setText(text)
+                status_label.show()
+                if not hasattr(self, '_tuning_status_timer'):
+                    self._tuning_status_timer = QTimer(self)
+                    self._tuning_status_timer.setSingleShot(True)
+                    self._tuning_status_timer.timeout.connect(lambda: status_label.hide())
+                self._tuning_status_timer.stop()
+                self._tuning_status_timer.start(3500)
+            else:
+                status_label.hide()
+        if text:
+            self.status.setText(text)
+            self.feedback.emit(text, is_error)
+
     def apply_power_policy(self,save=False):
         if hasattr(self,'tuning_enabled_row') and not self.tuning_enabled_row.isChecked():
-            self.report_error('Enable Tuning first'); return
+            self.set_tuning_status('Turn on Hardware Tuning first.', is_error=True); return
         apply_cpu=getattr(self,'apply_cpu_switch',None) is None or self.apply_cpu_switch.isChecked()
         apply_gpu=(getattr(self,'apply_gpu_switch',None) is not None and
                    self.apply_gpu_switch.isChecked() and
@@ -767,7 +787,7 @@ class Window(QMainWindow):
             try:
                 offset=int(self.prochot_offset.value())
             except (TypeError, ValueError):
-                self.report_error('Enter a PROCHOT offset, or turn its switch off.'); return
+                self.set_tuning_status('Enter a PROCHOT offset, or turn its switch off.', is_error=True); return
             if save:
                 self.settings.setValue('prochot_offset', offset)
                 self.settings.setValue('apply_prochot', True)
@@ -781,7 +801,7 @@ class Window(QMainWindow):
                 if boost_attr is not None and hasattr(boost_attr, 'isChecked') and type(boost_attr.isChecked()) is bool:
                     fields['boost'] = boost_attr.isChecked()
                 policy=power_policy(fields)
-            except ValueError as exc:self.report_error(str(exc));return
+            except ValueError as exc:self.set_tuning_status(str(exc), is_error=True);return
             if save:
                 self.saved_power_policies[mode]=policy
                 self.settings.setValue('power_policies',json.dumps(self.saved_power_policies))
@@ -799,7 +819,12 @@ class Window(QMainWindow):
             self.saved_gpu_policies.pop(mode, None)
             self.settings.setValue('gpu_policies', json.dumps(self.saved_gpu_policies))
         if not apply_cpu and not apply_gpu and not apply_prochot:
-            self.report_error('Turn on CPU limits, GPU limits, or PROCHOT first.')
+            self.set_tuning_status('Turn on CPU limits, GPU limits, or PROCHOT first.', is_error=True)
+            return
+
+        success_msg = 'Applied and saved.' if save else 'Applied and read back successfully.'
+        self.set_tuning_status(success_msg, is_error=False)
+
     def reset_power_policy(self):
         mode=str(self.power_profile.currentData())
         self.saved_power_policies.pop(mode,None);self.settings.setValue('power_policies',json.dumps(self.saved_power_policies))
@@ -826,6 +851,7 @@ class Window(QMainWindow):
         self.load_power_policy()
         if hasattr(self, 'refresh_prochot_ui'):
             self.refresh_prochot_ui()
+        self.set_tuning_status('Factory defaults restored.', is_error=False)
     def load_power_policy(self):
         mode=str(self.power_profile.currentData())
         policy=getattr(self,'saved_power_policies',{}).get(mode)

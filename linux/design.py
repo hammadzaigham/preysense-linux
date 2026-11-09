@@ -497,11 +497,8 @@ def finish_control_windows(window):
     window.power_profile.activated.connect(lambda index:window.apply('profile',window.power_profile.itemData(index),immediate=True))
     gated_l.addWidget(mode_row)
 
-    scroll=QScrollArea(); scroll.setWidgetResizable(True); scroll.setFrameShape(QFrame.NoFrame)
-    scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-    scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
     body=QWidget(); body_l=QVBoxLayout(body); body_l.setContentsMargins(0,0,0,0); body_l.setSpacing(8)
-    scroll.setWidget(body); gated_l.addWidget(scroll)
+    gated_l.addWidget(body)
 
     # Linux only exposes on/off via intel_pstate no_turbo (not Windows PERFBOOSTMODE).
     boost_row=SettingSwitchRow('CPU Boost', checked=True)
@@ -609,6 +606,14 @@ def finish_control_windows(window):
     try: window.power_apply.clicked.disconnect()
     except TypeError: pass
     window.power_apply.clicked.connect(lambda: window.apply_power_policy(False))
+
+    tuning_status = QLabel('')
+    tuning_status.setAlignment(Qt.AlignCenter)
+    tuning_status.setWordWrap(True)
+    tuning_status.hide()
+    window.tuning_status = tuning_status
+    gated_l.addWidget(tuning_status)
+
     footer=QHBoxLayout(); reset=action('Reset'); reset.clicked.connect(window.reset_power_policy)
     footer.addWidget(reset); footer.addWidget(window.power_apply)
     save=action('Save'); window.power_save=save; save.clicked.connect(lambda: window.apply_power_policy(True))
@@ -642,7 +647,6 @@ def finish_control_windows(window):
                 window.load_power_policy()
         if hasattr(window, 'refresh_prochot_ui'):
             window.refresh_prochot_ui()
-        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         QDialog.showEvent(tuning,event)
         tuning.resize(tuning.width(), tuning.sizeHint().height())
     tuning.showEvent=sync_tuning_on_show

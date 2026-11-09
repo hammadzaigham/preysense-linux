@@ -8,7 +8,10 @@ interfaces. Removed features are not pending parity work.
 Eco, Quiet, Balanced, Performance and Turbo use the Acer WMI bridge. The dedicated
 Turbo key cycles all five modes on AC and battery. Predator opens/hides the app;
 rapid Predator presses do not select Turbo. Source automation maps Eco/Quiet to
-power-saver, Balanced to balanced, and Performance/Turbo to performance.
+power-saver, Balanced to balanced, and Performance/Turbo to performance. The main
+window shows CPU/GPU temperature and fan RPM in the Performance Mode and GPU Mode
+headers while visible. One shared 1 Hz telemetry timer feeds the main window,
+overlay, and Custom fans; it stops when nothing requests sensors.
 
 CPU PL1, PL2 and Tau use standard Intel RAPL package domains. CPU boost uses
 intel_pstate. Writes retain readback and transactional rollback. Startup values
@@ -22,9 +25,24 @@ Boost switch (`intel_pstate` no_turbo), CPU/GPU Power Limits with apply
 switches, and Reset/Apply/Save. Mode dropdown switches the active Acer profile.
 Saved per-mode CPU/GPU policies and global PROCHOT fields live in
 `preysense.json` (`HardwareTuningEnabled`, `ApplyProchotOffset`, per-mode
-`ApplyCpuLimits` / `ApplyGpuLimits`). Calibration cycles only missing modes in
-Windows order, waits for stable readings and restores the original mode; see
+`ApplyCpuLimits` / `ApplyGpuLimits`). Factory defaults capture automatically at
+startup (ERM4-first, live RAPL settle fallback) with no consent prompt; see
 [calibration](calibration.md).
+
+### Performance / efficiency parity
+
+| Windows behavior | Linux |
+| --- | --- |
+| Acer Eco/Quiet/Balanced/Performance/Turbo | Present (WMI) |
+| Source profiles → power plans | Present → `power-profiles-daemon` |
+| RAPL PL1/PL2/Tau apply + readback | Present (powercap) |
+| CPU boost (PERFBOOSTMODE 0–6) | Partial: on/off via `no_turbo` |
+| PROCHOT offset | Present (MSR via `preysense.ko`) |
+| ERM4 GPU CT/DB/CP | Present (signed MMIO) |
+| Automatic factory capture | Present (ERM4 or live settle) |
+| Energy Saver battery toggle | Absent (Eco/Quiet + RAPL cover this) |
+| Live Advanced Optimus | Absent (boot GPU modes only) |
+
 
 ## Fans
 

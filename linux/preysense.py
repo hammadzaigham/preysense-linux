@@ -72,6 +72,7 @@ class Worker(QObject):
         self.cpu_dirty=True
         self.last_policy_mode = None
         self.overlay_demand = {"cpu": set(), "gpu": set(), "visible": False}
+        self.main_window_visible = False
     def _capture_startup_defaults(self):
         if not self.observed_defaults:return
         profiles=self.calibrator.cache
@@ -90,15 +91,21 @@ class Worker(QObject):
                     domains={'intel-rapl-mmio:0':{'pl1':prof['pl1'],'pl2':prof['pl2'],'tau':prof['tau']}}
                     try:self.observed_defaults.capture_snapshot(mode_val,domains,True)
                     except Exception:pass
+    def _custom_fans_active(self, mode=None):
+        if self.curve:
+            return True
+        if mode is None:
+            mode = self.hardware.control_read('profile')
+        return self.fan_policies.get(str(mode) if mode is not None else '', {}).get('kind') == 'Custom'
+
     @Slot()
     def start(self):
+        # One shared 1 Hz producer for main window, overlay, and custom fans.
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.poll)
         self.timer.setTimerType(Qt.PreciseTimer)
-        self.fan_timer=QTimer(self)
-        self.fan_timer.setTimerType(Qt.PreciseTimer)
-        self.fan_timer.timeout.connect(self.poll)
         self.poll()
+        self.update_sampling_timer()
     @Slot()
     def poll(self):
         if getattr(getattr(self,'calibration_cycle',None),'active',False) is True:return
@@ -109,23 +116,25 @@ class Worker(QObject):
             from telemetry_demand import demand
             initial=self.cached_data is None
             mode=self.hardware.control_read('profile')
-            custom=bool(self.curve or self.fan_policies.get(mode,{}).get('kind')=='Custom')
-            cpu_req,gpu_req=demand(self.overlay_demand,custom)
-            if not sensor_due:cpu_req,gpu_req=set(),set()
+            custom=self._custom_fans_active(mode)
+            # One sample cycle: union of every active consumer's requested fields.
+            cpu_req,gpu_req=demand(self.overlay_demand,custom,self.main_window_visible)
+            sample=sensor_due and bool(cpu_req or gpu_req)
+            if not sample:cpu_req,gpu_req=set(),set()
             if initial:
                 data=self.hardware.snapshot(requested=cpu_req)
             else:
                 data=dict(self.cached_data)
                 data.update(getattr(self.hardware,'_control_cache',{}))
                 if cpu_req:data.update(self.hardware.sensor_snapshot(cpu_req))
-            data['telemetry_sample']=sensor_due and bool(cpu_req or gpu_req)
+            data['telemetry_sample']=sample
             if sensor_due:self.last_sensor_poll=now
             calibration_profile=data.get("profile")
 
             if self.animator.active:data['led_timeout']=str(self.animator.timeout)
             if gpu_req:data['gpu'] = self.hardware.gpu_snapshot(requested=gpu_req)
             elif initial:data['gpu']={}
-            if custom:data['gpu_temp']=(data['gpu'] or {}).get('temperature')
+            if custom and sample:data['gpu_temp']=(data['gpu'] or {}).get('temperature')
             if not hasattr(self,'gpu_mode_data'):self.gpu_mode_data=self.gpu_mode.snapshot()
             data['gpu_mode'] = self.gpu_mode_data
             if self.last_display_poll==0:
@@ -181,7 +190,7 @@ class Worker(QObject):
                     if 'boost' in power:self.cpu_power.set_boost(power['boost'])
                 data['cpu_power']=self.cpu_power.snapshot()
                 self.cpu_dirty=False
-            if self.curve and sensor_due and 'cpu_temp' in cpu_req:
+            if self.curve and sample:
                 try:
                     cpu = float(data.get('cpu_temp') or 0)
                     gpu = float(data.get('gpu_temp') or 0)
@@ -199,16 +208,21 @@ class Worker(QObject):
                 data['calibration']=self.calibrator.update(data)
             self.cached_data=data
             self.state_dirty=False
+            # One shared snapshot for every consumer (main window, overlay, fans).
             self.snapshot.emit(data)
-            self.update_sampling_timers()
+            self.update_sampling_timer()
         except Exception as exc:
             self.done.emit('Telemetry', str(exc))
-    def update_sampling_timers(self):
-        overlay=bool(self.overlay_demand.get('visible') and any(m!='None' for m in self.overlay_demand.get('cpu',set())|self.overlay_demand.get('gpu',set())))
-        for timer,needed in ((self.timer,overlay),(self.fan_timer,bool(self.curve))):
-            if needed:
-                if not timer.isActive():timer.start(1000)
-            else:timer.stop()
+    def update_sampling_timer(self):
+        """Start/stop the single shared timer from active consumer demand."""
+        from telemetry_demand import sampling_needed
+        timer=getattr(self,'timer',None)
+        if timer is None:return
+        needed=sampling_needed(self.overlay_demand,self._custom_fans_active(),self.main_window_visible)
+        if needed:
+            if not timer.isActive():timer.start(1000)
+        elif timer.isActive():
+            timer.stop()
 
     @Slot(str, object)
     def command(self, name, args):
@@ -220,15 +234,32 @@ class Worker(QObject):
         try:
             if name == 'refresh_ui':
                 pass
+            elif name == 'main_window_visible':
+                visible=bool(args)
+                changed=self.main_window_visible!=visible
+                self.main_window_visible=visible
+                self.update_sampling_timer()
+                if not changed:
+                    self.state_dirty=False
+                    return
+                if visible:
+                    self.last_sensor_poll=float('-inf')
+                    self.poll()
+                else:
+                    self.state_dirty=False
+                return
             elif name=='power_source_event':
                 self.source_dirty=True
             elif name == 'overlay_metrics':
+                from telemetry_demand import sampling_needed
                 self.overlay_demand = {
                     'cpu': set(args.get('cpu', [])),
                     'gpu': set(args.get('gpu', [])),
                     'visible': bool(args.get('visible', False))
                 }
-                if not self.overlay_demand['visible']:self.timer.stop()
+                if sampling_needed(self.overlay_demand, self._custom_fans_active(), self.main_window_visible):
+                    self.last_sensor_poll=float('-inf')
+                self.update_sampling_timer()
             elif name=='calibrate':
                 if args:
                     self.begin_calibration()
@@ -322,15 +353,22 @@ class Worker(QObject):
         self.poll()
 
     def begin_calibration(self):
-        from calibration_cycle import CalibrationCycle
-        self.timer.stop()
-        self.fan_timer.stop()
+        """Automatic factory capture: ERM4-first (Windows path), else live mode settle."""
+        from factory_capture import try_automatic_erm4, capture_prochot_and_static
+        if getattr(self,'timer',None) is not None:self.timer.stop()
         try:
             self.power_ownership.release()
             if self.curve:self.hardware.write('fan_mode',0);self.curve=None
+            self.calibration_progress.emit('Reading factory profiles…')
+            if try_automatic_erm4(self.calibrator, self.cpu_power):
+                self.calibration_progress.emit('Factory defaults saved.')
+                self.finish_calibration('')
+                return
+            capture_prochot_and_static(self.cpu_power)
             base=dict(self.cached_data or {})
             base.pop('custom_fans',None)
             base.pop('gpu',None)
+            from calibration_cycle import CalibrationCycle
             cycle=CalibrationCycle(self.hardware,self.cpu_power,self.calibrator,base,parent=self)
             self.calibration_cycle=cycle
             cycle.progress.connect(self.calibration_progress)
@@ -344,14 +382,14 @@ class Worker(QObject):
         if not self.shutting_down:
             self._capture_startup_defaults()
             self.poll()
+            self.update_sampling_timer()
         self.calibration_finished.emit(error)
 
     @Slot()
     def shutdown(self):
         self.shutting_down=True
         if self.calibration_cycle is not None:self.calibration_cycle.cancel()
-        self.timer.stop()
-        self.fan_timer.stop()
+        if getattr(self,'timer',None) is not None:self.timer.stop()
         try:self.animator.stop()
         except Exception as exc:self.done.emit('Lighting',str(exc))
         self.hardware.close_lighting()
@@ -534,10 +572,10 @@ class Window(QMainWindow):
         design.build(self)
 
     def prompt_startup_calibration(self):
+        """Match Windows CaptureMissingFactoryDefaultsAsync — automatic, no consent prompt."""
         if not self._calibration_needed or self.quitting:return
-        from calibration_ui import confirm_calibration,run_calibration
-        if confirm_calibration(self):
-            self._calibration_needed=not run_calibration(self)
+        from calibration_ui import run_calibration
+        self._calibration_needed=not run_calibration(self)
 
     def setup_tray(self):
         self.tray = QSystemTrayIcon(self.windowIcon(), self)
@@ -556,7 +594,23 @@ class Window(QMainWindow):
         else:self.show_window()
     def showEvent(self,event):
         super().showEvent(event)
+        self.set_main_window_telemetry_visible(True)
         if hasattr(self,'command'):self.command.emit('refresh_ui',None)
+
+    def hideEvent(self,event):
+        self.set_main_window_telemetry_visible(False)
+        super().hideEvent(event)
+
+    def set_main_window_telemetry_visible(self, visible):
+        """Match Windows SetMainWindowTelemetryVisible: poll temps/RPM only while shown."""
+        if getattr(self, 'quitting', False):
+            visible = False
+        if hasattr(self, 'cpu_header'):
+            # Reopening waits for a fresh sample rather than showing stale readings.
+            self.cpu_header.setText('CPU: N/A · N/A')
+            self.gpu_header.setText('GPU: N/A · N/A')
+        if hasattr(self, 'command'):
+            self.command.emit('main_window_visible', bool(visible))
 
     def show_window(self):
         self.showNormal();self.raise_();self.activateWindow()

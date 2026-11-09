@@ -40,7 +40,7 @@ def _profile_from_values(values):
     boost_mode = values.get('CpuBoostMode')
     if boost_mode is None and isinstance(boost, bool):
         boost_mode = 1 if boost else 0
-    return {
+    profile = {
         'CpuPl1Watts': int(round(float(pl1))),
         'CpuPl2Watts': int(round(float(pl2))),
         'CpuTurboTimeLimitSeconds': int(round(float(tau))),
@@ -51,6 +51,18 @@ def _profile_from_values(values):
         'pl2': float(pl2),
         'tau': float(tau),
     }
+    for src, dst in (
+        ('GpuPowerOffsetWatts', 'GpuPowerOffsetWatts'),
+        ('GpuDynamicBoostWatts', 'GpuDynamicBoostWatts'),
+        ('PlatformPowerOffsetWatts', 'PlatformPowerOffsetWatts'),
+        ('ct', 'GpuPowerOffsetWatts'),
+        ('db', 'GpuDynamicBoostWatts'),
+        ('cp', 'PlatformPowerOffsetWatts'),
+    ):
+        raw = values.get(src)
+        if type(raw) in (int, float) and raw == int(raw) and 0 <= raw <= 255:
+            profile[dst] = int(raw)
+    return profile
 
 
 class Calibrator:
@@ -146,10 +158,18 @@ class Calibrator:
     def begin_batch(self):
         self._pending = {}
 
-    def stage_profile(self, mode_name, pl1, pl2, tau, boost=None):
-        profile = _profile_from_values({
+    def stage_profile(self, mode_name, pl1, pl2, tau, boost=None, gpu=None):
+        values = {
             'CpuPl1Watts': pl1, 'CpuPl2Watts': pl2, 'CpuTurboTimeLimitSeconds': tau, 'CpuBoost': boost,
-        })
+        }
+        if isinstance(gpu, dict):
+            if gpu.get('ct') is not None:
+                values['GpuPowerOffsetWatts'] = gpu['ct']
+            if gpu.get('db') is not None:
+                values['GpuDynamicBoostWatts'] = gpu['db']
+            if gpu.get('cp') is not None:
+                values['PlatformPowerOffsetWatts'] = gpu['cp']
+        profile = _profile_from_values(values)
         if not profile:
             raise ValueError(f'{mode_name} CPU limits are incomplete')
         self._pending[mode_name] = profile
@@ -205,37 +225,25 @@ class Calibrator:
                 latest[mode] = profile
                 count += 1
             # Persist Windows-shaped fields only.
-            serializable = {
-                name: {
+            serializable = {}
+            for name, values in latest.items():
+                entry = {
                     'CpuPl1Watts': values['CpuPl1Watts'],
                     'CpuPl2Watts': values['CpuPl2Watts'],
                     'CpuTurboTimeLimitSeconds': values['CpuTurboTimeLimitSeconds'],
                     'CpuBoost': values.get('CpuBoost'),
                     'CpuBoostMode': values.get('CpuBoostMode'),
                 }
-                for name, values in latest.items()
-            }
+                for key in ('GpuPowerOffsetWatts', 'GpuDynamicBoostWatts', 'PlatformPowerOffsetWatts'):
+                    if values.get(key) is not None:
+                        entry[key] = values[key]
+                serializable[name] = entry
             encoded = json.dumps(serializable, indent=2, sort_keys=True).encode()
             if len(encoded) > MAX_BYTES:
                 raise ValueError('Calibration size limit reached')
             return latest, corrupt, count, encoded, serializable
 
-        if fcntl is None:
-            latest, corrupt, count, encoded, serializable = merge_and_encode()
-            if count == 0:
-                self.cache = latest
-                return self._status(next(iter(additions), None))
-            if corrupt and self.path.exists():
-                self.path.replace(self.path.with_name(self.path.name + '.corrupt-' + uuid.uuid4().hex))
-            self.path.write_bytes(encoded)
-            self._sync_config_store(serializable)
-            self.cache = {name: _profile_from_values(v) for name, v in serializable.items()}
-            self.corrupt = False
-            return self._status(next(iter(additions), None), count=count, written=True)
-
-        with lock_path.open('a') as lock:
-            fcntl.flock(lock, fcntl.LOCK_EX)
-            latest, corrupt, count, encoded, serializable = merge_and_encode()
+        def commit_atomic(latest, corrupt, count, encoded, serializable):
             if count == 0:
                 self.cache = latest
                 return self._status(next(iter(additions), None))
@@ -245,17 +253,26 @@ class Calibrator:
             try:
                 with tempfile.NamedTemporaryFile(dir=self.path.parent, prefix='.calibration-', delete=False) as stream:
                     temporary = Path(stream.name)
-                    os.chmod(temporary, 0o600)
+                    try:
+                        os.chmod(temporary, 0o600)
+                    except OSError:
+                        pass
                     stream.write(encoded)
                     stream.flush()
-                    os.fsync(stream.fileno())
+                    try:
+                        os.fsync(stream.fileno())
+                    except OSError:
+                        pass
                 os.replace(temporary, self.path)
                 temporary = None
-                directory = os.open(self.path.parent, os.O_RDONLY | os.O_DIRECTORY)
                 try:
-                    os.fsync(directory)
-                finally:
-                    os.close(directory)
+                    directory = os.open(self.path.parent, os.O_RDONLY | getattr(os, 'O_DIRECTORY', 0))
+                    try:
+                        os.fsync(directory)
+                    finally:
+                        os.close(directory)
+                except OSError:
+                    pass
             finally:
                 if temporary is not None:
                     temporary.unlink(missing_ok=True)
@@ -263,6 +280,13 @@ class Calibrator:
             self.cache = {name: _profile_from_values(v) for name, v in serializable.items()}
             self.corrupt = False
             return self._status(next(iter(additions), None), count=count, written=True)
+
+        if fcntl is None:
+            return commit_atomic(*merge_and_encode())
+
+        with lock_path.open('a') as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            return commit_atomic(*merge_and_encode())
 
     def _sync_config_store(self, serializable):
         if self.config_store is None:

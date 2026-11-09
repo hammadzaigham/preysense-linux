@@ -608,6 +608,21 @@ static void erm4_read_triplet(u8 mode, u8 *db, u8 *ct, u8 *cp)
 	*cp = ioread8(erm4 + off + 2);
 }
 
+/* Full ERM4 profile record used by Windows DriverFactoryCalibration.CaptureFromErm4:
+ * DB base address holds [P1, PL1, Tau, PL2, DB, CT, CP] starting at base-4.
+ */
+static void erm4_read_profile(u8 mode, u8 *pl1, u8 *tau, u8 *pl2, u8 *db, u8 *ct, u8 *cp)
+{
+	u16 off = erm4_db_offset(mode);
+
+	*pl1 = ioread8(erm4 + off - 3);
+	*tau = ioread8(erm4 + off - 2);
+	*pl2 = ioread8(erm4 + off - 1);
+	*db = ioread8(erm4 + off);
+	*ct = ioread8(erm4 + off + 1);
+	*cp = ioread8(erm4 + off + 2);
+}
+
 static void erm4_write_triplet(u8 mode, u8 db, u8 ct, u8 cp)
 {
 	u16 off = erm4_db_offset(mode);
@@ -738,10 +753,31 @@ static ssize_t gpu_offsets_available_show(struct device *dev, struct device_attr
 }
 static DEVICE_ATTR_RO(gpu_offsets_available);
 
+static ssize_t factory_profiles_show(struct device *dev, struct device_attribute *a, char *buf)
+{
+	static const u8 modes[] = { 0, 1, 4, 5, 6 };
+	size_t n = 0;
+	unsigned int i;
+
+	if (!erm4)
+		return -ENODEV;
+	mutex_lock(&erm4_gate);
+	for (i = 0; i < ARRAY_SIZE(modes); i++) {
+		u8 pl1, tau, pl2, db, ct, cp;
+
+		erm4_read_profile(modes[i], &pl1, &tau, &pl2, &db, &ct, &cp);
+		n += scnprintf(buf + n, PAGE_SIZE - n, "%u %u %u %u %u %u %u\n",
+			       modes[i], pl1, tau, pl2, ct, db, cp);
+	}
+	mutex_unlock(&erm4_gate);
+	return n;
+}
+static DEVICE_ATTR_RO(factory_profiles);
+
 static struct attribute *preysense_attrs[] = { &dev_attr_profile.attr, &dev_attr_fan_mode.attr,
 	&dev_attr_cpu_temp.attr, &dev_attr_gpu_temp.attr, &dev_attr_cpu_fan.attr, &dev_attr_gpu_fan.attr, &dev_attr_cpu_vid_mv.attr,
 	&dev_attr_cpu_prochot.attr,
-	&dev_attr_gpu_offsets.attr, &dev_attr_gpu_offsets_available.attr,
+	&dev_attr_gpu_offsets.attr, &dev_attr_gpu_offsets_available.attr, &dev_attr_factory_profiles.attr,
 	&dev_attr_battery_limit.attr, &dev_attr_fan_duty.attr, &dev_attr_boot_sound.attr, &dev_attr_led_timeout.attr, &dev_attr_usb_charging.attr, &dev_attr_lcd_overdrive.attr, &dev_attr_predator_events.attr, &dev_attr_event_notifications.attr, &dev_attr_predator_down.attr, &dev_attr_keyboard_idle_ms.attr, &dev_attr_shortcut_events.attr, &dev_attr_gpu_mux.attr, NULL };
 ATTRIBUTE_GROUPS(preysense);
 

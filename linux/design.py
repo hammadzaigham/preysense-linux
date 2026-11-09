@@ -158,10 +158,24 @@ def update(window,data):
         tile.setChecked(name==firmware)
         tile.setEnabled(gpu_state.get('writable',False) and
                         (name!='NVIDIA GPU Only' or gpu_state.get('discrete_available',False)))
-    # Clean headers matching original WPF MainWindow.xaml (no embedded telemetry or boot status)
-    if hasattr(window,'cpu_header') and window.cpu_header: window.cpu_header.setText("")
-    if hasattr(window,'gpu_header') and window.gpu_header: window.gpu_header.setText("")
     if hasattr(window,'display_header') and window.display_header: window.display_header.setText("")
+    # MainWindow headers: CPU/GPU temp · RPM while visible (Windows MainWindow.xaml).
+    if hasattr(window,'cpu_header') and window.cpu_header:
+        if window.isVisible() and data.get('telemetry_sample', True):
+            def _temp(key):
+                val=data.get(key)
+                if val is None or str(val)=='0': return 'N/A'
+                return f'{val}°C'
+            def _rpm(key):
+                val=data.get(key)
+                if val is None: return 'N/A'
+                try: return f'{int(float(val)/100+.5)*100} RPM'
+                except (TypeError, ValueError): return 'N/A'
+            window.cpu_header.setText(f"CPU: {_temp('cpu_temp')} · {_rpm('cpu_fan')}")
+            window.gpu_header.setText(f"GPU: {_temp('gpu_temp')} · {_rpm('gpu_fan')}")
+        elif not window.isVisible():
+            window.cpu_header.setText('CPU: N/A · N/A')
+            window.gpu_header.setText('GPU: N/A · N/A')
     if not window.profile_editors_initialized and hasattr(window,'saved_fan_policies'):
         try:current=int(data.get('profile') or 1)
         except ValueError:current=1

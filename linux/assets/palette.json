@@ -20,8 +20,8 @@
     "Light": "#E2E6EB"
   },
   "BorderMainColor": {
-    "Dark": "#373737",
-    "Light": "#B9C0C9"
+    "Dark": "#1C1C1C",
+    "Light": "#F5F6F8"
   },
   "BorderSecondColor": {
     "Dark": "#2A2A2A",

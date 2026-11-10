@@ -210,8 +210,8 @@ def update(window,data):
 
 STYLE='''
 QWidget { background:#1c1c1c; color:#f0f0f0; font-size:12px; }
-QWidget#shell { border:1px solid #373737; border-radius:8px; }
-QDialog[preysenseShell="true"] { border:1px solid #373737; border-radius:8px; }
+QWidget#shell { border:1px solid #1c1c1c; border-radius:8px; }
+QDialog[preysenseShell="true"] { border:1px solid #1c1c1c; border-radius:8px; }
 QWidget#preysenseTitleBar { background:transparent; }
 QLabel#windowBrand,QLabel#windowSubtitle { font-size:12px; font-weight:600; }
 QLabel#sectionTitle { font-size:13px; font-weight:600; }

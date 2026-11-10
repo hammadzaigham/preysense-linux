@@ -247,7 +247,7 @@ def confirm_gpu_mode(parent, mode):
     from PySide6.QtWidgets import QDialog, QPushButton, QFrame
     dialog = QDialog(parent)
     dialog.setWindowTitle('PreySense • Hardware Discrete GPU')
-    dialog.setWindowFlags(dialog.windowFlags() | Qt.FramelessWindowHint | Qt.NoDropShadowWindowHint)
+    dialog.setWindowFlags(dialog.windowFlags() | Qt.FramelessWindowHint)
     dialog.setModal(True)
     dialog.setFixedWidth(440)
     dialog.setObjectName('gpuModeConfirmation')

@@ -1,7 +1,7 @@
 """Shared 30px title bar matching the Windows WindowTitleBar control."""
 from pathlib import Path
 from PySide6.QtCore import Qt,QEvent,QRectF,QTimer
-from PySide6.QtGui import QPixmap,QPainter,QColor,QPen
+from PySide6.QtGui import QPixmap,QPainter,QColor,QPen,QPainterPath,QRegion
 from PySide6.QtWidgets import QWidget,QHBoxLayout,QLabel,QPushButton
 
 class WindowTitleBar(QWidget):
@@ -11,7 +11,7 @@ class WindowTitleBar(QWidget):
         dialog.setProperty('preysenseShell',True)
         if not hasattr(dialog,'_preysense_border'):
             dialog._preysense_border=WindowBorder(dialog)
-        dialog.setWindowFlags(dialog.windowFlags()|Qt.FramelessWindowHint|Qt.NoDropShadowWindowHint)
+        dialog.setWindowFlags(dialog.windowFlags()|Qt.FramelessWindowHint)
         layout=QHBoxLayout(self);layout.setContentsMargins(8,0,0,0);layout.setSpacing(0)
         icon=QLabel();icon.setFixedSize(16,16)
         from icon_assets import svg_icon_pixmap
@@ -51,21 +51,29 @@ class WindowTitleBar(QWidget):
 
 
 class WindowBorder(QWidget):
-    """Paint above child content so the shell border remains continuous."""
+    """Paint above child content and maintain rounded window masking."""
     def __init__(self,owner):
         super().__init__(owner);self.owner=owner
         self.setAttribute(Qt.WA_TransparentForMouseEvents)
         self.setAttribute(Qt.WA_NoSystemBackground)
         self.setStyleSheet('background:transparent;border:none;')
         owner.installEventFilter(self)
-        self.setGeometry(owner.rect());self.show();self.raise_()
+        self.update_geometry()
+        self.show();self.raise_()
+    def update_geometry(self):
+        w, h = self.owner.width(), self.owner.height()
+        if w > 0 and h > 0:
+            self.setGeometry(0, 0, w, h)
+            path = QPainterPath()
+            path.addRoundedRect(QRectF(0, 0, w, h), 8.0, 8.0)
+            self.owner.setMask(QRegion(path.toFillPolygon().toPolygon()))
     def eventFilter(self,obj,event):
         if event.type() in (QEvent.Resize,QEvent.Show):
-            self.setGeometry(self.owner.rect());self.raise_()
+            self.update_geometry();self.raise_()
             if event.type()==QEvent.Show:QTimer.singleShot(0,self.raise_)
         return False
     def paintEvent(self,event):
         from appearance import color
         painter=QPainter(self);painter.setRenderHint(QPainter.Antialiasing)
-        painter.setPen(QPen(QColor(color('BorderMainColor','#373737')),1));painter.setBrush(Qt.NoBrush)
+        painter.setPen(QPen(QColor(color('BorderMainColor','#1c1c1c')),1));painter.setBrush(Qt.NoBrush)
         painter.drawRoundedRect(QRectF(.5,.5,self.width()-1,self.height()-1),7.5,7.5)

@@ -12,7 +12,7 @@ class DocumentationWindow(QDialog):
     def __init__(self,parent):
         super().__init__(parent);self.setWindowTitle('PreySense • Linux Documentation');self.resize(760,660)
         self.root=Path(__file__).resolve().parents[1];self.history=[]
-        self.setWindowFlags(self.windowFlags() | Qt.FramelessWindowHint | Qt.NoDropShadowWindowHint)
+        self.setWindowFlags(self.windowFlags() | Qt.FramelessWindowHint)
         root=QVBoxLayout(self);root.setContentsMargins(0,0,0,0);root.setSpacing(0)
         root.addWidget(WindowTitleBar(self,'Linux Documentation'))
         content=QWidget();layout=QVBoxLayout(content);layout.setContentsMargins(14,10,14,8);layout.setSpacing(8);root.addWidget(content)

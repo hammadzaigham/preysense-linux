@@ -43,7 +43,7 @@ def _make_frameless_dialog(parent, title_text, width=540):
     dialog = _PlatformDialog(parent)
     dialog.setWindowTitle(f"PreySense • {title_text}")
     dialog.setFixedWidth(width)
-    dialog.setWindowFlags(dialog.windowFlags() | Qt.FramelessWindowHint | Qt.NoDropShadowWindowHint)
+    dialog.setWindowFlags(dialog.windowFlags() | Qt.FramelessWindowHint)
 
     root_layout = QVBoxLayout(dialog)
     root_layout.setContentsMargins(0, 0, 0, 0)

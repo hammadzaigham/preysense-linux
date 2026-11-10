@@ -117,7 +117,7 @@ def build(window):
     window.status.hide()
     window.setCentralWidget(root);window.setFixedWidth(500);window.setMinimumHeight(0);window.adjustSize()
     window.setWindowTitle('PreySense')
-    window.setWindowFlags(window.windowFlags()|Qt.FramelessWindowHint|Qt.NoDropShadowWindowHint)
+    window.setWindowFlags(window.windowFlags()|Qt.FramelessWindowHint)
     window.overlay_dialog=QDialog(window);window.overlay_dialog.setWindowTitle('PreySense • Overlay');window.overlay_dialog.resize(540,380)
     ol=QVBoxLayout(window.overlay_dialog)
     from metrics_overlay import controls as overlay_controls

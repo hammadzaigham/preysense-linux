@@ -20,8 +20,8 @@
     "Light": "#E2E6EB"
   },
   "BorderMainColor": {
-    "Dark": "#1C1C1C",
-    "Light": "#F5F6F8"
+    "Dark": "#373737",
+    "Light": "#D8DDE3"
   },
   "BorderSecondColor": {
     "Dark": "#2A2A2A",
@@ -118,5 +118,13 @@
   "PlaceholderTextColor": {
     "Dark": "#8F8F8F",
     "Light": "#69727D"
+  },
+  "WindowBorderColor": {
+    "Dark": "#1C1C1C",
+    "Light": "#F5F6F8"
+  },
+  "SeparatorColor": {
+    "Dark": "#373737",
+    "Light": "#D8DDE3"
   }
 }

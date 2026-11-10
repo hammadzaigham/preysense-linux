@@ -75,5 +75,5 @@ class WindowBorder(QWidget):
     def paintEvent(self,event):
         from appearance import color
         painter=QPainter(self);painter.setRenderHint(QPainter.Antialiasing)
-        painter.setPen(QPen(QColor(color('BorderMainColor','#1c1c1c')),1));painter.setBrush(Qt.NoBrush)
+        painter.setPen(QPen(QColor(color('WindowBorderColor','#1c1c1c')),1));painter.setBrush(Qt.NoBrush)
         painter.drawRoundedRect(QRectF(.5,.5,self.width()-1,self.height()-1),7.5,7.5)

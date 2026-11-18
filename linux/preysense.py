@@ -851,7 +851,9 @@ class Window(QMainWindow):
                    self.apply_gpu_switch.isChecked() and
                    bool(getattr(self,'gpu_offsets_available',False) is True) and
                    'Mock' not in type(getattr(self,'gpu_ct',None)).__name__)
-        apply_gpu_oc=getattr(self,'apply_gpu_oc_switch',None) is not None and self.apply_gpu_oc_switch.isChecked()
+        apply_gpu_oc=(getattr(self,'apply_gpu_oc_switch',None) is not None and
+                      self.apply_gpu_oc_switch.isChecked() is True and
+                      'Mock' not in type(getattr(self,'gpu_core_offset',None)).__name__)
         apply_prochot=(getattr(self,'prochot_switch',None) is not None and
                        self.prochot_switch.isChecked() and
                        hasattr(self,'prochot_offset') and

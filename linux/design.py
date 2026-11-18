@@ -612,6 +612,14 @@ def finish_control_windows(window):
     window.gpu_mem_slider.valueChanged.connect(on_mem_slide)
     on_core_slide(0); on_mem_slide(0)
 
+    class _SliderValue:
+        def __init__(self, row): self._row=row
+        def value(self): return int(self._row.value())
+        def setValue(self, v):
+            self._row.slider.blockSignals(True); self._row.setValue(int(v)); self._row.slider.blockSignals(False)
+            self._row.label_value.setText(f'{int(v)}{self._row._unit}')
+        def setEnabled(self, enabled): self._row.setEnabled(enabled)
+
     window.gpu_core_offset = _SliderValue(window.gpu_core_slider)
     window.gpu_mem_offset = _SliderValue(window.gpu_mem_slider)
     window.apply_gpu_oc_switch.toggled.connect(lambda on: gpu_oc_panel.setEnabled(on and gpu_clocks.is_available()))
@@ -631,13 +639,6 @@ def finish_control_windows(window):
     for slider in (window.gpu_ct_slider, window.gpu_db_slider, window.gpu_cp_slider):
         configure_snap(slider.slider, 5)
         gpu_l.addWidget(slider)
-    class _SliderValue:
-        def __init__(self, row): self._row=row
-        def value(self): return int(self._row.value())
-        def setValue(self, v):
-            self._row.slider.blockSignals(True); self._row.setValue(int(v)); self._row.slider.blockSignals(False)
-            self._row.label_value.setText(f'{int(v)}{self._row._unit}')
-        def setEnabled(self, enabled): self._row.setEnabled(enabled)
     window.gpu_ct=_SliderValue(window.gpu_ct_slider)
     window.gpu_db=_SliderValue(window.gpu_db_slider)
     window.gpu_cp=_SliderValue(window.gpu_cp_slider)

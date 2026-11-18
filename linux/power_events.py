@@ -45,7 +45,8 @@ class PowerEvents(QObject):
             return
         connection = None
         try:
-            connection = socket.socket(socket.AF_NETLINK, socket.SOCK_DGRAM,
+            af_netlink = getattr(socket, 'AF_NETLINK', 16)
+            connection = socket.socket(af_netlink, socket.SOCK_DGRAM,
                                        getattr(socket, 'NETLINK_KOBJECT_UEVENT', 15))
             connection.setblocking(False)
             # Port ID zero asks the kernel for a unique ID; group 1 is uevents.

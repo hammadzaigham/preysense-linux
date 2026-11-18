@@ -19,37 +19,37 @@ class FollowerTests(unittest.TestCase):
         self.assertEqual(gpu, 0)
         cpu, gpu, stage = follower.evaluate(56, 40, stages, 0, 1000)
         self.assertEqual(stage, 1)
-        shared = max(rpm_to_duty(1800, CPU_MAX_RPM), rpm_to_duty(1850, CPU_MAX_RPM))
-        self.assertEqual(cpu, shared)
-        self.assertEqual(gpu, shared)
+        self.assertEqual(cpu, rpm_to_duty(1800, CPU_MAX_RPM))
+        self.assertEqual(gpu, 0)
 
     def test_gpu_rise_alone_advances_stage(self):
         follower = FanCurveFollower()
         _, _, stage = follower.evaluate(40, 50, self.balanced(), 0, 0)
         self.assertEqual(stage, 1)
 
-    def test_retreat_requires_both_sensors_clear(self):
+    def test_retreat_uses_cooling_hysteresis(self):
         follower = FanCurveFollower()
         stages = self.balanced()
         follower.evaluate(65, 56, stages, 0, 0)
         _, _, stage = follower.evaluate(65, 56, stages, 0, 1000)
         self.assertEqual(stage, 2)
+        # GPU at 56 still keeps GPU at stage 2
         _, _, stage = follower.evaluate(50, 56, stages, 0, 2000)
         self.assertEqual(stage, 2)
+        # 60 and 52: below stage-1 rises (65-3=62, 56-3=53) -> stage 1
         _, _, stage = follower.evaluate(60, 52, stages, 0, 3000)
         self.assertEqual(stage, 1)
+        # 40 and 40: below stage-0 rises -> 0
         _, _, stage = follower.evaluate(40, 40, stages, 0, 4000)
         self.assertEqual(stage, 0)
 
-    def test_shared_delay_holds_stage_change(self):
+    def test_stage_changes_immediately_without_delay(self):
         follower = FanCurveFollower()
         stages = self.balanced()
         follower.evaluate(40, 40, stages, delay_seconds=2, now_ms=0)
         _, _, stage = follower.evaluate(56, 40, stages, delay_seconds=2, now_ms=500)
-        self.assertEqual(stage, 0)
+        self.assertEqual(stage, 1)
         _, _, stage = follower.evaluate(56, 40, stages, delay_seconds=2, now_ms=2499)
-        self.assertEqual(stage, 0)
-        _, _, stage = follower.evaluate(56, 40, stages, delay_seconds=2, now_ms=2500)
         self.assertEqual(stage, 1)
 
     def test_disabled_trip_does_not_advance_on_that_sensor(self):
@@ -67,10 +67,11 @@ class FollowerTests(unittest.TestCase):
             [s['CpuTargetRpm'] for s in default_stages(6)],
         )
 
-    def test_both_fans_use_max_duty(self):
+    def test_independent_fan_duties(self):
         curve = FanCurve(stages=self.balanced(), delay=0)
         duty = curve.target(cpu_temp=56, gpu_temp=40, now=0)
-        self.assertEqual(duty[0], duty[1])
+        self.assertEqual(duty[0], rpm_to_duty(1800, CPU_MAX_RPM))
+        self.assertEqual(duty[1], 0)
 
     def test_policy_round_trip_stages(self):
         from mode_policies import fan_policy

@@ -21,7 +21,7 @@ class Owner(QWidget):
         self.original_timeout=QSlider(Qt.Horizontal);self.original_timeout.setRange(0,120);self.original_timeout.setValue(30)
         self.sync_logo_checkbox=QCheckBox();self.sync_logo=False;self.lighting_target='Keyboard'
         self.sync_logo_checkbox.toggled.connect(self.set_sync_logo)
-        self.lighting_target_states={'Keyboard':dict(colors=self.colors[:],brightness=80,effect='Static',speed=5),'Logo':dict(colors=[QColor('#ffffff')]*4,brightness=60,effect='Neon',speed=3)}
+        self.lighting_target_states={'Keyboard':dict(colors=self.colors[:],brightness=80,effect='Static',speed=5),'Logo':dict(colors=[QColor('#ffffff')]*4,brightness=60,effect='Neon',speed=3),'ModeKey':dict(colors=[QColor('#00AEC7')]*4,brightness=100,effect='Mode',speed=5)}
     def set_sync_logo(self,value):self.sync_logo=value;self.settings.setValue('sync_logo',value)
     def apply(self,name,args):self.commands.append((name,args))
     def apply_lighting(self):Window.apply_lighting(self)
@@ -34,7 +34,7 @@ class LightingUiTests(unittest.TestCase):
         self.app.setStyleSheet('')
         self.owner=Owner();self.dialog=build_lighting_window(self.owner);self.dialog.show();self.app.processEvents();self.ui=self.owner.lighting_ui
     def tearDown(self):self.ui['apply_timer'].stop();self.dialog.close();self.owner.close();self.app.processEvents();self.owner.temp.cleanup()
-    def settle(self):QTest.qWait(110)
+    def settle(self):QTest.qWait(180)
     def test_build_and_target_navigation_do_not_apply_or_offer_apply_status(self):
         self.assertEqual(self.dialog.width(),500)
         self.ui['select_target']('Logo');self.assertEqual(self.owner.effect.currentText(),'Neon')
@@ -107,4 +107,20 @@ class LightingUiTests(unittest.TestCase):
     def test_timeout_commit_uses_one_actual_value(self):
         self.owner.original_timeout.setValue(60);self.owner.original_timeout.sliderReleased.emit()
         self.assertEqual(self.owner.commands,[('led_timeout',60)])
+
+    def test_mode_key_ui_navigation_and_apply(self):
+        self.ui['select_target']('ModeKey')
+        self.assertEqual(self.owner.lighting_target, 'ModeKey')
+        self.assertTrue(self.ui['mode_key'].isChecked())
+        self.ui['sync_mode_key'].setChecked(False)
+        self.settle()
+        self.assertEqual(self.owner.commands[-1][0], 'mode_key_lighting')
+        self.ui['mode_key_mode'].setCurrentText('Static')
+        self.ui['mode_key_hex'].setText('#FF5500')
+        self.ui['mode_key_hex'].editingFinished.emit()
+        self.settle()
+        cmd, args = self.owner.commands[-1]
+        self.assertEqual(cmd, 'mode_key_lighting')
+        self.assertEqual(args['color'], (255, 85, 0))
+        self.assertEqual(args['effect'], 'Static')
 if __name__=='__main__':unittest.main()

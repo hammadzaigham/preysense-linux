@@ -12,6 +12,7 @@ from controls import ColorWheel
 from hardware import EFFECTS
 from lighting_effects import SOFTWARE_EFFECTS
 from appearance import color as theme_color
+from mode_key_lighting import SLOTS, color_for, normalize_hex, ensure_defaults, only_custom_overrides
 
 
 class ColorSwatch(QWidget):
@@ -97,8 +98,8 @@ def build_lighting_window(window):
         try:timeout.sliderReleased.disconnect()
         except RuntimeError:pass
     timeout.sliderReleased.connect(lambda:window.apply('led_timeout', timeout.value()))
-    tabs=QHBoxLayout();keyboard=button('Keyboard');logo=button('Logo')
-    for item in (keyboard,logo):item.setCheckable(True);tabs.addWidget(item)
+    tabs=QHBoxLayout();keyboard=button('Keyboard');logo=button('Logo');mode_key=button('Mode Key')
+    for item in (keyboard,logo,mode_key):item.setCheckable(True);tabs.addWidget(item)
     layout.addLayout(tabs)
     keyboard_panel=QWidget();kb=QVBoxLayout(keyboard_panel);kb.setContentsMargins(0,0,0,0);kb.setSpacing(8)
     mode=QComboBox();mode.addItems(['Static','Dynamic','Software']);mode.setFixedWidth(154);row(kb,'Lighting Mode',mode)
@@ -143,6 +144,29 @@ def build_lighting_window(window):
     logo_speed=QSlider(Qt.Horizontal);logo_speed.setRange(0,100);logo_speed_label=QLabel()
     row(lsp,'Animation Speed',logo_speed_label);lsp.addWidget(logo_speed)
     layout.addWidget(logo_panel)
+    mode_key_panel=QWidget();mk=QVBoxLayout(mode_key_panel);mk.setContentsMargins(0,0,0,0);mk.setSpacing(8)
+    sync_mode_key=AudioSwitch();sync_mode_key.setChecked(window.settings.value('mode_key_sync',True,type=bool))
+    setattr(window,'sync_mode_key',sync_mode_key.isChecked())
+    row(mk,'Sync With Keyboard',sync_mode_key)
+    mode_key_effect_panel=QWidget();mkep=QVBoxLayout(mode_key_effect_panel);mkep.setContentsMargins(0,0,0,0)
+    mode_key_mode=QComboBox();mode_key_mode.addItems(['Mode','Static','Breathing','Neon']);mode_key_mode.setFixedWidth(154)
+    row(mkep,'Effect Mode',mode_key_mode);mk.addWidget(mode_key_effect_panel)
+    mode_swatches_panel=QWidget();msp=QVBoxLayout(mode_swatches_panel);msp.setContentsMargins(0,0,0,0);msp.setSpacing(6)
+    row(msp,'Operating Mode Colors',QLabel())
+    swatches_row=QWidget();srl=QHBoxLayout(swatches_row);srl.setContentsMargins(0,0,0,0);srl.setSpacing(4)
+    selected_mode_slot=[1]
+    mode_slot_buttons={}
+    from PySide6.QtWidgets import QPushButton
+    for slot_mode,slot_name,default_hex in SLOTS:
+        b=QPushButton(slot_name);b.setCheckable(True);b.setMinimumHeight(28);srl.addWidget(b);mode_slot_buttons[slot_mode]=b
+    msp.addWidget(swatches_row);mk.addWidget(mode_swatches_panel)
+    mode_key_color_panel=QWidget();mkcp=QVBoxLayout(mode_key_color_panel);mkcp.setContentsMargins(0,0,0,0);mkcp.setSpacing(8)
+    mode_key_wheel=ColorWheel();mode_key_wheel.setFixedSize(140,140);mkcp.addWidget(mode_key_wheel,0,Qt.AlignHCenter)
+    mode_key_hexrow,mode_key_hex,mode_key_swatch=color_editor();mkcp.addWidget(mode_key_hexrow);mk.addWidget(mode_key_color_panel)
+    mode_key_speed_panel=QWidget();mksp=QVBoxLayout(mode_key_speed_panel);mksp.setContentsMargins(0,0,0,0)
+    mode_key_speed=QSlider(Qt.Horizontal);mode_key_speed.setRange(0,100);mode_key_speed_label=QLabel()
+    row(mksp,'Animation Speed',mode_key_speed_label);mksp.addWidget(mode_key_speed);mk.addWidget(mode_key_speed_panel)
+    layout.addWidget(mode_key_panel)
     window.rgb_apply.setParent(previous);window.rgb_apply.hide()
     window.rgb_status.setParent(previous);window.rgb_status.hide()
     hardware_options=[('Breathing','Breathing'),('Neon Wave','Neon'),('Color Wave','Wave'),('Ripple',None),('Zoom','Zoom'),('Snake',None),('Disco',None)]
@@ -152,40 +176,103 @@ def build_lighting_window(window):
         window.effect.blockSignals(True)
         if window.effect.findText(value)<0:window.effect.addItem(value)
         window.effect.setCurrentText(value);window.effect.blockSignals(False)
+    def paint_mode_slots():
+        overrides = window.settings.value('mode_key_colors', {}) or {}
+        for s_mode, btn in mode_slot_buttons.items():
+            col = color_for(s_mode, overrides)
+            is_sel = (s_mode == selected_mode_slot[0])
+            fg = '#111111' if QColor(col).lightness() > 130 else '#ffffff'
+            border = '2px solid #00E5FF' if is_sel else '1px solid #373737'
+            btn.setStyleSheet(f'background:{col};color:{fg};border:{border};border-radius:3px;font-weight:600;min-height:28px;')
+
     def paint():
         target=window.lighting_target
-        current=window.colors[0] if target=='Logo' else window.colors[selected[0]]
-        chosen=logo_wheel if target=='Logo' else wheel;field=logo_hex if target=='Logo' else hexedit
+        if target=='Logo':
+            current=window.colors[0]
+            chosen=logo_wheel;field=logo_hex;swatch=logo_swatch
+        elif target=='ModeKey':
+            current=window.colors[0]
+            chosen=mode_key_wheel;field=mode_key_hex;swatch=mode_key_swatch
+        else:
+            current=window.colors[selected[0]]
+            chosen=wheel;field=hexedit;swatch=hex_swatch
         chosen.color=QColor(current);chosen.update();field.setText(current.name().upper())
-        swatch=logo_swatch if target=='Logo' else hex_swatch;swatch.color=QColor(current);swatch.update()
+        swatch=logo_swatch if target=='Logo' else mode_key_swatch if target=='ModeKey' else hex_swatch
+        swatch.color=QColor(current);swatch.update()
         window.paint_colors()
         for item in window.color_buttons:item.setStyleSheet(item.styleSheet().replace('min-height:64px','min-height:32px'))
+        paint_mode_slots()
     def changed(color):
         if loading[0]:return
-        if window.lighting_target=='Logo' or sync.isChecked():window.colors=[QColor(color) for _ in range(4)]
+        target=window.lighting_target
+        if target=='ModeKey':
+            mk_m = mode_key_mode.currentText()
+            if mk_m == 'Mode':
+                overrides = dict(window.settings.value('mode_key_colors', {}) or {})
+                overrides[f"{selected_mode_slot[0]:02X}"] = color.name().upper()
+                window.settings.setValue('mode_key_colors', overrides)
+                paint_mode_slots()
+            window.colors=[QColor(color) for _ in range(4)]
+        elif target=='Logo' or sync.isChecked():window.colors=[QColor(color) for _ in range(4)]
         else:window.colors[selected[0]]=QColor(color)
         paint()
         request_apply()
-    wheel.changed.connect(changed);logo_wheel.changed.connect(changed)
+    wheel.changed.connect(changed);logo_wheel.changed.connect(changed);mode_key_wheel.changed.connect(changed)
     def commit(field):
         value=QColor(field.text())
         if value.isValid():changed(value)
         else:paint()
-    hexedit.editingFinished.connect(lambda:commit(hexedit));logo_hex.editingFinished.connect(lambda:commit(logo_hex))
+    hexedit.editingFinished.connect(lambda:commit(hexedit));logo_hex.editingFinished.connect(lambda:commit(logo_hex));mode_key_hex.editingFinished.connect(lambda:commit(mode_key_hex))
     def choose_zone(index):selected[0]=index;paint()
     for index,item in enumerate(window.color_buttons):item.clicked.connect(lambda checked=False,i=index:choose_zone(i))
+
+    def select_mode_slot(s_mode):
+        selected_mode_slot[0] = s_mode
+        overrides = window.settings.value('mode_key_colors', {}) or {}
+        col = QColor(color_for(s_mode, overrides))
+        window.colors = [QColor(col) for _ in range(4)]
+        paint()
+        request_apply()
+
+    for s_mode, s_btn in mode_slot_buttons.items():
+        s_btn.clicked.connect(lambda checked=False, m=s_mode: select_mode_slot(m))
+
+    def on_mode_key_mode_changed(_=None):
+        if not loading[0]:
+            api_effect(mode_key_mode.currentText())
+            request_apply()
+        visibility()
+    mode_key_mode.currentIndexChanged.connect(on_mode_key_mode_changed)
+
+    def on_sync_mode_key_toggled(enabled):
+        setattr(window, 'sync_mode_key', enabled)
+        window.settings.setValue('mode_key_sync', enabled)
+        visibility()
+        request_apply()
+    sync_mode_key.toggled.connect(on_sync_mode_key_toggled)
+
+    mode_key_speed.valueChanged.connect(lambda v: (mode_key_speed_label.setText(f'{v}%'), (window.speed.setValue(round(v/10)), request_apply()) if not loading[0] else None))
+
     def visibility():
         static=mode.currentText()=='Static';is_keyboard=window.lighting_target=='Keyboard'
         sync_panel.setVisible(static);sync.setVisible(static);sync_label.setVisible(static);preset_panel.setVisible(static and not sync.isChecked());zones.setVisible(static and not sync.isChecked())
         wheel.setVisible(static);hexrow.setVisible(static);effect_row.setVisible(not static);speed_panel.setVisible(not static)
         independent=power.isChecked() and not sync_logo.isChecked()
-        window.brightness.setEnabled(is_keyboard or independent)
+        is_mode_key = window.lighting_target == 'ModeKey'
+        mode_key_independent = not sync_mode_key.isChecked()
+        window.brightness.setEnabled(is_keyboard or (window.lighting_target=='Logo' and independent) or (is_mode_key and mode_key_independent))
         sync_logo.setEnabled(power.isChecked())
         for item in (logo_mode,logo_preset,logo_wheel,logo_hex):item.setEnabled(independent)
         logo_speed.setEnabled(independent and logo_mode.currentText()!='Static')
         logo_effect_panel.setVisible(not sync_logo.isChecked())
         logo_color_panel.setVisible(not sync_logo.isChecked() and logo_mode.currentText()=='Static')
         logo_speed_panel.setVisible(not sync_logo.isChecked() and logo_mode.currentText()!='Static')
+        # Mode key visibility
+        mode_key_effect_panel.setVisible(mode_key_independent)
+        mk_m = mode_key_mode.currentText()
+        mode_swatches_panel.setVisible(mode_key_independent and mk_m == 'Mode')
+        mode_key_color_panel.setVisible(mode_key_independent and mk_m in ('Mode', 'Static', 'Breathing'))
+        mode_key_speed_panel.setVisible(mode_key_independent and mk_m in ('Breathing', 'Neon'))
         QTimer.singleShot(0,fit_height)
     def choose_mode(_=None,desired=None):
         effect_combo.blockSignals(True);effect_combo.clear()
@@ -240,27 +327,32 @@ def build_lighting_window(window):
             target_states[window.lighting_target]=dict(colors=[QColor(c) for c in window.colors],brightness=window.brightness.value(),effect=window.effect.currentText(),speed=window.speed.value())
         loading[0]=True
         try:
-            window.lighting_target=name;state=target_states[name]
+            window.lighting_target=name;state=target_states.get(name, dict(colors=[QColor('#00AEC7')]*4,brightness=100,effect='Mode',speed=5))
             window.colors=[QColor(c) for c in state['colors']];window.brightness.setValue(state['brightness']);window.speed.setValue(state['speed'])
-            api_effect(state['effect']);selected[0]=0;keyboard.setChecked(name=='Keyboard');logo.setChecked(name=='Logo')
-            keyboard_panel.setVisible(name=='Keyboard');logo_panel.setVisible(name=='Logo')
-            value=state['speed']*10;speed.setValue(value);logo_speed.setValue(value);set_speed(value)
+            api_effect(state['effect']);selected[0]=0
+            keyboard.setChecked(name=='Keyboard');logo.setChecked(name=='Logo');mode_key.setChecked(name=='ModeKey')
+            keyboard_panel.setVisible(name=='Keyboard');logo_panel.setVisible(name=='Logo');mode_key_panel.setVisible(name=='ModeKey')
+            value=state['speed']*10;speed.setValue(value);logo_speed.setValue(value);mode_key_speed.setValue(value);set_speed(value)
             if name=='Keyboard':
                 mode.setCurrentText('Software' if state['effect'] in SOFTWARE_EFFECTS else 'Static' if state['effect']=='Static' else 'Dynamic');choose_mode(desired=state['effect'])
-            else:power.setChecked(state['effect']!='Off');logo_mode.setCurrentText(state['effect'] if state['effect']!='Off' else 'Static')
+            elif name=='Logo':
+                power.setChecked(state['effect']!='Off');logo_mode.setCurrentText(state['effect'] if state['effect']!='Off' else 'Static')
+            elif name=='ModeKey':
+                sync_mode_key.setChecked(window.settings.value('mode_key_sync', True, type=bool))
+                mode_key_mode.setCurrentText(state.get('effect', 'Mode'))
             paint();visibility()
         finally:loading[0]=False
         QTimer.singleShot(0,fit_height)
-    keyboard.clicked.connect(lambda:select_target('Keyboard'));logo.clicked.connect(lambda:select_target('Logo'))
+    keyboard.clicked.connect(lambda:select_target('Keyboard'));logo.clicked.connect(lambda:select_target('Logo'));mode_key.clicked.connect(lambda:select_target('ModeKey'))
     def preview(colors):
         if window.lighting_target=='Keyboard' and mode.currentText()=='Software':
             for item,value in zip(window.color_buttons,colors):item.setStyleSheet(f'background:rgb{tuple(value)};min-height:32px;')
     window.worker.lighting_frame.connect(preview)
-    window.lighting_ui=dict(mode=mode,preset=preset,sync=sync,keyboard=keyboard,logo=logo,effect=effect_combo,speed=speed,logo_mode=logo_mode,logo_power=power,logo_preset=logo_preset,wheel=wheel,logo_wheel=logo_wheel,hex=hexedit,logo_hex=logo_hex,sync_logo=sync_logo,apply_timer=apply_timer,select_target=select_target,flush_pending=flush_pending,reflect_keyboard_brightness=reflect_keyboard_brightness)
+    window.lighting_ui=dict(mode=mode,preset=preset,sync=sync,keyboard=keyboard,logo=logo,mode_key=mode_key,effect=effect_combo,speed=speed,logo_mode=logo_mode,logo_power=power,logo_preset=logo_preset,wheel=wheel,logo_wheel=logo_wheel,mode_key_wheel=mode_key_wheel,hex=hexedit,logo_hex=logo_hex,mode_key_hex=mode_key_hex,sync_logo=sync_logo,sync_mode_key=sync_mode_key,mode_key_mode=mode_key_mode,apply_timer=apply_timer,select_target=select_target,flush_pending=flush_pending,reflect_keyboard_brightness=reflect_keyboard_brightness)
     select_target(getattr(window,'lighting_target','Keyboard'),True)
     from slider_snap import configure_snap
     configure_snap(window.brightness,25)
     configure_snap(timeout,10,30)
-    configure_snap(speed,25);configure_snap(logo_speed,25)
+    configure_snap(speed,25);configure_snap(logo_speed,25);configure_snap(mode_key_speed,25)
     fit_height()
     return dialog

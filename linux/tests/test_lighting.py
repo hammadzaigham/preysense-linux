@@ -5,7 +5,8 @@ sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 from lighting_effects import SOFTWARE_EFFECTS,frame
 from lighting_animation import LightingAnimation
 from hardware import Hardware
-from PySide6.QtCore import QCoreApplication,QObject,Signal
+from PySide6.QtCore import QObject,Signal
+from PySide6.QtWidgets import QApplication
 
 class EffectTests(unittest.TestCase):
  def test_every_effect_is_four_bounded_rgb_zones(self):
@@ -26,27 +27,36 @@ class EffectTests(unittest.TestCase):
 class LogoTests(unittest.TestCase):
  def test_logo_has_distinct_target_and_mask(self):
   with tempfile.TemporaryDirectory() as temp:
-   node=Path(temp)/'hid';node.touch();h=Hardware();self.addCleanup(h.close_lighting)
-   with patch.object(h,'hid_device',return_value=node),patch('hardware.fcntl.ioctl') as ioctl:
-    h.logo_lighting((10,20,30),80,'Static',10)
-    self.assertEqual(ioctl.call_args.args[2],bytes([0xa4,0x83,2,80,5,0,10,20,30,1,0]))
+   node=Path(temp)/'hid';node.touch();h=Hardware()
+   try:
+    with patch.object(h,'hid_device',return_value=node),patch('hardware.fcntl.ioctl') as ioctl:
+     h.logo_lighting((10,20,30),80,'Static',10)
+     self.assertEqual(ioctl.call_args.args[2],bytes([0xa4,0x83,2,80,5,0,10,20,30,1,0]))
+   finally:
+    h.close_lighting()
  def test_dynamic_effect_applies_original_luminance_scaling(self):
   with tempfile.TemporaryDirectory() as temp:
-   node=Path(temp)/'hid';node.touch();h=Hardware();self.addCleanup(h.close_lighting)
-   with patch.object(h,'hid_device',return_value=node),patch('hardware.fcntl.ioctl') as ioctl:
-    h.lighting([(100,200,40)]*4,50,'Breathing',5)
-    self.assertEqual(ioctl.call_args.args[2][6:9],bytes([50,100,20]))
+   node=Path(temp)/'hid';node.touch();h=Hardware()
+   try:
+    with patch.object(h,'hid_device',return_value=node),patch('hardware.fcntl.ioctl') as ioctl:
+     h.lighting([(100,200,40)]*4,50,'Breathing',5)
+     self.assertEqual(ioctl.call_args.args[2][6:9],bytes([50,100,20]))
+   finally:
+    h.close_lighting()
  def test_logo_average_uses_all_four_zones(self):
   from hardware import average_color
   self.assertEqual(average_color([(100,0,0),(0,100,0),(0,0,100),(100,100,100)]),(50,50,50))
  def test_logo_off_and_keyboard_off_opcode(self):
   with tempfile.TemporaryDirectory() as temp:
-   node=Path(temp)/'hid';node.touch();h=Hardware();self.addCleanup(h.close_lighting)
-   with patch.object(h,'hid_device',return_value=node),patch('hardware.fcntl.ioctl') as ioctl:
-    h.logo_lighting((10,20,30),0)
-    self.assertEqual(ioctl.call_args.args[2],bytes([0xa4,0x83,1,0,0,0,0,0,0,1,0]))
-    h.lighting([(10,20,30)]*4,0)
-    self.assertEqual(ioctl.call_args.args[2][2],2)
+   node=Path(temp)/'hid';node.touch();h=Hardware()
+   try:
+    with patch.object(h,'hid_device',return_value=node),patch('hardware.fcntl.ioctl') as ioctl:
+     h.logo_lighting((10,20,30),0)
+     self.assertEqual(ioctl.call_args.args[2],bytes([0xa4,0x83,1,0,0,0,0,0,0,1,0]))
+     h.lighting([(10,20,30)]*4,0)
+     self.assertEqual(ioctl.call_args.args[2][2],2)
+   finally:
+    h.close_lighting()
 
 class Owner(QObject):
  lighting_frame=Signal(list)
@@ -56,7 +66,7 @@ class Owner(QObject):
 
 class AnimationTests(unittest.TestCase):
  @classmethod
- def setUpClass(cls):cls.app=QCoreApplication.instance() or QCoreApplication([])
+ def setUpClass(cls):cls.app=QApplication.instance() or QApplication([])
  def setUp(self):self.owner=Owner();self.animation=LightingAnimation(self.owner)
  def tearDown(self):
   if self.animation.active:self.animation.stop()

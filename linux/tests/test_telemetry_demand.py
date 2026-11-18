@@ -32,6 +32,11 @@ class TelemetryDemandTests(unittest.TestCase):
         self.assertEqual(gpu, {'temperature'})
         self.assertTrue(sampling_needed({'visible': False}, custom_fans=True))
 
+    def test_fan_window_samples_temps_and_rpms(self):
+        cpu, gpu = demand({'visible': False}, fan_window=True)
+        self.assertEqual(cpu, set(MAIN_WINDOW_SENSORS))
+        self.assertTrue(sampling_needed({'visible': False}, fan_window=True))
+
     def test_main_window_and_overlay_union(self):
         cpu, gpu = demand(
             {'visible': True, 'cpu': ('Usage', 'Fan Speed'), 'gpu': ('Power',)},

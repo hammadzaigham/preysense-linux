@@ -8,9 +8,9 @@ from __future__ import annotations
 from pathlib import Path
 
 ROOT = Path('/sys/devices/platform/preysense')
-MAX_CT = 100
+MAX_CT = 255
 MAX_DB = 25
-MAX_CP = 100
+MAX_CP = 255
 
 
 def snap(watts, maximum):
@@ -21,11 +21,11 @@ def snap(watts, maximum):
 def validate(ct, db, cp=None):
     ct, db = snap(ct, MAX_CT), snap(db, MAX_DB)
     if ct % 5 or db % 5 or not 0 <= ct <= MAX_CT or not 0 <= db <= MAX_DB:
-        raise ValueError('GPU CT/DB must be 0–100 / 0–25 in steps of 5')
+        raise ValueError('GPU CT/DB must be 0–255 / 0–25 in steps of 5')
     if cp is not None:
         cp = snap(cp, MAX_CP)
         if cp % 5 or not 0 <= cp <= MAX_CP:
-            raise ValueError('Platform power offset must be 0–100 in steps of 5')
+            raise ValueError('Platform power offset must be 0–255 in steps of 5')
     return ct, db, cp
 
 

@@ -11,7 +11,7 @@ def load(name,default):
     except (OSError,ValueError):return default
 PALETTE=load('palette.json',{})
 TRANSLATIONS=load('translations.json',{'en-US':{}})
-LANGUAGES={'English':'en-US','Simplified Chinese':'zh-CN','Hindi':'hi-IN','Spanish':'es-ES','French':'fr-FR'}
+LANGUAGES={'English':'en-US','Simplified Chinese':'zh-CN','Hindi':'hi-IN','Spanish':'es-ES','French':'fr-FR','Turkish':'tr-TR'}
 CURRENT_THEME='Dark'
 CURRENT_LANGUAGE='en-US'
 

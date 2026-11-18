@@ -1,5 +1,9 @@
 """Bounded lifecycle for the single PreySense hardware helper."""
-import os,subprocess,pwd,json
+import os,subprocess,json
+try:
+    import pwd
+except ImportError:
+    pwd = None
 from pathlib import Path
 UNITS=('preysense-hardware.service',)
 CONFIG=Path('/usr/lib/preysense/service-lifecycle.json') if Path('/usr/lib/preysense').exists() else Path('/opt/preysense/linux/service-lifecycle.json')

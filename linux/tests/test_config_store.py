@@ -86,5 +86,51 @@ class ConfigStoreTests(unittest.TestCase):
         self.assertEqual(facade.value('overlay_slot_count'), 6)
         self.assertEqual(facade.value('hud_corner_radius'), 6)
 
+    def test_gpu_clock_and_master_switches_persistence(self):
+        store = ConfigStore(self.path)
+        facade = JsonSettings(store)
+        self.assertTrue(facade.value('enable_cpu_boost_tuning', type=bool))
+        self.assertFalse(facade.value('enable_cpu_power_limits', type=bool))
+        self.assertFalse(facade.value('enable_gpu_power_limits', type=bool))
+        self.assertFalse(facade.value('enable_gpu_overclocking', type=bool))
+
+        facade.setValue('enable_gpu_overclocking', True)
+        facade.setValue('enable_cpu_power_limits', True)
+        facade.setValue('gpu_clock_policies', json.dumps({'5': {'core': 120, 'mem': 250}}))
+
+        again = JsonSettings(ConfigStore(self.path))
+        self.assertTrue(again.value('enable_gpu_overclocking', type=bool))
+        self.assertTrue(again.value('enable_cpu_power_limits', type=bool))
+        clocks = json.loads(again.value('gpu_clock_policies'))
+        self.assertEqual(clocks['5']['core'], 120)
+        self.assertEqual(clocks['5']['mem'], 250)
+        turbo = ConfigStore(self.path).data['Tuning']['Turbo']
+        self.assertTrue(turbo['ApplyGpuClockOffsets'])
+        self.assertEqual(turbo['GpuCoreClockOffsetMhz'], 120)
+        self.assertEqual(turbo['GpuMemoryClockOffsetMhz'], 250)
+
+    def test_mode_key_lighting_persistence(self):
+        store = ConfigStore(self.path)
+        facade = JsonSettings(store)
+        self.assertTrue(facade.value('mode_key_sync', type=bool))
+        self.assertEqual(facade.value('mode_key_effect'), 'Mode')
+        self.assertEqual(facade.value('mode_key_color'), '#00AEC7')
+        self.assertEqual(facade.value('mode_key_brightness'), 100)
+
+        facade.setValue('mode_key_sync', False)
+        facade.setValue('mode_key_effect', 'Static')
+        facade.setValue('mode_key_color', '#FF5500')
+        facade.setValue('mode_key_brightness', 85)
+        facade.setValue('mode_key_speed', 7)
+        facade.setValue('mode_key_colors', {'05': '#C700FF', '01': '#00FF00'})
+
+        again = JsonSettings(ConfigStore(self.path))
+        self.assertFalse(again.value('mode_key_sync', type=bool))
+        self.assertEqual(again.value('mode_key_effect'), 'Static')
+        self.assertEqual(again.value('mode_key_color'), '#FF5500')
+        self.assertEqual(again.value('mode_key_brightness'), 85)
+        self.assertEqual(again.value('mode_key_speed'), 7)
+        self.assertEqual(again.value('mode_key_colors'), {'05': '#C700FF', '01': '#00FF00'})
+
 
 if __name__=='__main__':unittest.main()

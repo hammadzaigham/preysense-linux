@@ -683,9 +683,9 @@ static ssize_t gpu_offsets_store(struct device *dev, struct device_attribute *a,
 		return -EINVAL;
 	if (mode != 0 && mode != 1 && mode != 4 && mode != 5 && mode != 6)
 		return -EINVAL;
-	if (ct > 100 || ct % 5 || db > 25 || db % 5)
+	if (ct > 255 || ct % 5 || db > 25 || db % 5)
 		return -EINVAL;
-	if (matched == 4 && (cp > 100 || cp % 5))
+	if (matched == 4 && (cp > 255 || cp % 5))
 		return -EINVAL;
 
 	selected = (u8)mode;

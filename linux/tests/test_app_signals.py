@@ -8,6 +8,7 @@ class SignalTests(unittest.TestCase):
  @classmethod
  def setUpClass(cls):cls.app=QApplication.instance() or QCoreApplication.instance() or QApplication([])
  def test_signal_wakes_idle_loop_without_recurring_timer(self):
+  if not hasattr(signal, 'SIGUSR1'): raise unittest.SkipTest('SIGUSR1 not available on Windows')
   wake=SignalWakeup();old=signal.getsignal(signal.SIGUSR1);seen=[]
   signal.signal(signal.SIGUSR1,lambda *_:(seen.append(True),self.app.quit()))
   QTimer.singleShot(0,lambda:os.kill(os.getpid(),signal.SIGUSR1))

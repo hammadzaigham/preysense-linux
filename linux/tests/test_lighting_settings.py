@@ -24,4 +24,19 @@ class LightingSettingsTests(unittest.TestCase):
  def test_invalid_saved_report_is_rejected(self):
   self.s.setValue('effect','Static');self.s.setValue('colors',['not-a-color']*4)
   with self.assertRaises(ValueError):startup_lighting(self.s)
+ def test_mode_key_lighting_replay(self):
+  self.s.setValue('mode_key_effect','Static')
+  self.s.setValue('mode_key_color','#FF5500')
+  self.s.setValue('mode_key_brightness',90)
+  self.s.setValue('mode_key_speed',8)
+  self.s.setValue('mode_key_sync',False)
+  commands=startup_lighting(self.s)
+  self.assertEqual(len(commands),1)
+  name,args=commands[0]
+  self.assertEqual(name,'mode_key_lighting')
+  self.assertEqual(args['color'],(255,85,0))
+  self.assertEqual(args['effect'],'Static')
+  self.assertEqual(args['brightness'],90)
+  self.assertEqual(args['speed'],8)
+  self.assertFalse(args['sync'])
 if __name__=='__main__':unittest.main()

@@ -220,7 +220,11 @@ def apply_entry_temperatures(stages, stage_indices, entry_celsius, gpu=False):
     rise_key = _rise_key(gpu)
     temps = [max(GRAPH_MIN_C, min(GRAPH_MAX_C, int(t))) for t in entry_celsius]
     for i in range(1, len(temps)):
-        temps[i] = max(temps[i], temps[i - 1] + 1)
+        if temps[i] <= temps[i - 1]:
+            temps[i] = min(DISABLED_TRIP - 1, temps[i - 1] + 1)
+    for i in range(len(temps) - 2, -1, -1):
+        if temps[i] >= temps[i + 1]:
+            temps[i] = max(0, temps[i + 1] - 1)
     for visible, stage_index in enumerate(stage_indices):
         if stage_index <= 0 or stage_index >= len(stages):
             continue
@@ -275,59 +279,71 @@ def enforce_nondecreasing(values):
     return values
 
 
+COOLING_HYSTERESIS_C = 3
+
+
 class FanCurveFollower:
+    """Immediate boost increases with temperature hysteresis on decreases; no timer or keepalive."""
+
     def __init__(self):
-        self._stage = None
-        self._pending_stage = None
-        self._pending_since = 0
+        self._cpu_stage = 0
+        self._gpu_stage = 0
+
+    @property
+    def cpu_stage(self):
+        return self._cpu_stage
+
+    @property
+    def gpu_stage(self):
+        return self._gpu_stage
+
+    @property
+    def cpu_pending_stage(self):
+        return None
+
+    @property
+    def gpu_pending_stage(self):
+        return None
 
     def reset(self):
-        self._stage = None
-        self._pending_stage = None
-        self._pending_since = 0
+        self._cpu_stage = 0
+        self._gpu_stage = 0
 
     def evaluate(self, cpu_temp, gpu_temp, stages, delay_seconds=0, now_ms=None):
-        if now_ms is None:
-            now_ms = int(time.monotonic() * 1000)
         stages = normalize_stages(stages)
         if not stages:
             return 0, 0, 0
-        stage = 0 if self._stage is None else max(0, min(len(stages) - 1, self._stage))
-        desired = stage
-        while desired < len(stages) - 1 and self._should_advance(cpu_temp, gpu_temp, stages[desired]):
-            desired += 1
-        while desired > 0 and self._should_retreat(cpu_temp, gpu_temp, stages, desired):
-            desired -= 1
-        delay = max(0, min(5, int(delay_seconds)))
-        if delay <= 0 or desired == stage:
-            self._pending_stage = None
-            self._stage = desired
-        else:
-            if self._pending_stage != desired:
-                self._pending_stage = desired
-                self._pending_since = now_ms
-            if now_ms - self._pending_since >= delay * 1000:
-                self._stage = desired
-                self._pending_stage = None
-        applied = 0 if self._stage is None else max(0, min(len(stages) - 1, self._stage))
-        current = stages[applied]
-        duty = max(current['CpuDutyPercent'], current['GpuDutyPercent'])
-        return duty, duty, applied
+        cpu_t = float(cpu_temp if cpu_temp is not None else 0)
+        gpu_t = float(gpu_temp if gpu_temp is not None and 0 < gpu_temp <= 125 else cpu_t)
+        self._cpu_stage = self._follow(cpu_t, stages, False, self._cpu_stage)
+        self._gpu_stage = self._follow(gpu_t, stages, True, self._gpu_stage)
+        return (
+            stages[self._cpu_stage]['CpuDutyPercent'],
+            stages[self._gpu_stage]['GpuDutyPercent'],
+            max(self._cpu_stage, self._gpu_stage),
+        )
 
     @staticmethod
-    def _should_advance(cpu, gpu, stage):
-        cpu_trip = stage['CpuTempC'] < DISABLED_TRIP and cpu >= stage['CpuTempC']
-        gpu_trip = stage['GpuTempC'] < DISABLED_TRIP and gpu >= stage['GpuTempC']
-        return cpu_trip or gpu_trip
+    def _reached(temperature, rise):
+        return rise < DISABLED_TRIP and temperature >= rise
 
     @staticmethod
-    def _should_retreat(cpu, gpu, stages, stage_index):
-        if stage_index <= 0:
-            return False
-        previous = stages[stage_index - 1]
-        cpu_clear = previous['CpuTempC'] >= DISABLED_TRIP or cpu < previous['CpuTempC']
-        gpu_clear = previous['GpuTempC'] >= DISABLED_TRIP or gpu < previous['GpuTempC']
-        return cpu_clear and gpu_clear
+    def _cooled(temperature, rise):
+        return rise >= DISABLED_TRIP or temperature <= (rise - COOLING_HYSTERESIS_C)
+
+    @classmethod
+    def _follow(cls, temperature, stages, gpu, current):
+        stage = max(0, min(len(stages) - 1, current))
+        rise_key = _rise_key(gpu)
+
+        def rise(idx):
+            return stages[idx].get(rise_key, stages[idx].get('CpuRiseC' if not gpu else 'GpuRiseC', DISABLED_TRIP))
+
+        while stage < len(stages) - 1 and cls._reached(temperature, rise(stage)):
+            stage += 1
+        while stage > 0 and cls._cooled(temperature, rise(stage - 1)):
+            stage -= 1
+        return stage
 
 
 class FanCurve:

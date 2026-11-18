@@ -103,6 +103,14 @@ def build_platform_windows(window):
     s_layout.addWidget(row_theme)
     window._row_theme = row_theme
 
+    # D. Auto Refresh Rate
+    auto_refresh_val = bool(window.settings.value("auto_refresh", False, type=bool)) if hasattr(window, "settings") else False
+    row_auto_refresh = SettingSwitchRow("Auto Refresh Rate", checked=auto_refresh_val)
+    if hasattr(window, "apply"):
+        row_auto_refresh.toggled.connect(lambda checked: window.apply("auto_refresh", checked))
+    s_layout.addWidget(row_auto_refresh)
+    window._row_auto_refresh = row_auto_refresh
+
     # Separator
     # Note: separator above battery limit removed per UI polish request
 
@@ -133,6 +141,24 @@ def build_platform_windows(window):
     row_usb.label_value.setText('Disabled' if row_usb.value()==0 else f'{row_usb.value()}%')
     row_usb.valueChanged.connect(lambda value:row_usb.label_value.setText('Disabled' if value==0 else f'{value}%'))
     window._row_usb = row_usb
+
+    # Tuning & Lighting Settings (Matches Windows SettingsWindow.xaml)
+    _separator(s_layout)
+    row_tuning_settings = SettingActionRow("Tuning Settings", action_text="Open")
+    def open_tuning_settings():
+        if hasattr(window, 'dialogs') and 'TuningSettings' in window.dialogs:
+            window.dialogs['TuningSettings'].show()
+    row_tuning_settings.clicked.connect(open_tuning_settings)
+    s_layout.addWidget(row_tuning_settings)
+    window._row_tuning_settings = row_tuning_settings
+
+    row_lighting_settings = SettingActionRow("Lighting Settings", action_text="Open")
+    def open_lighting_settings():
+        if hasattr(window, 'dialogs') and 'Lighting' in window.dialogs:
+            window.dialogs['Lighting'].show()
+    row_lighting_settings.clicked.connect(open_lighting_settings)
+    s_layout.addWidget(row_lighting_settings)
+    window._row_lighting_settings = row_lighting_settings
 
     # ── 2. ADVANCED / POWER PROFILES & ACPI (AdvancedWindow.xaml) ─────────
     adv_dialog=settings_dialog

@@ -38,12 +38,12 @@ def overlay_needs_sampling(overlay):
     return bool(metrics - {'None', None, ''})
 
 
-def sampling_needed(overlay, custom_fans=False, main_window=False):
+def sampling_needed(overlay, custom_fans=False, main_window=False, fan_window=False):
     """Whether the shared 1 Hz timer should run."""
-    return bool(main_window or custom_fans or overlay_needs_sampling(overlay))
+    return bool(main_window or custom_fans or fan_window or overlay_needs_sampling(overlay))
 
 
-def demand(overlay, custom_fans=False, main_window=False):
+def demand(overlay, custom_fans=False, main_window=False, fan_window=False):
     """Union of sensor fields for one shared snapshot this cycle."""
     if overlay_needs_sampling(overlay):
         cpu = {CPU[m] for m in overlay.get('cpu', ()) if m in CPU}
@@ -53,7 +53,7 @@ def demand(overlay, custom_fans=False, main_window=False):
     if custom_fans:
         cpu.add('cpu_temp')
         gpu.add('temperature')
-    if main_window:
+    if main_window or fan_window:
         cpu |= set(MAIN_WINDOW_SENSORS)
     if 'gpu_fan' in gpu:
         cpu.add('gpu_fan')

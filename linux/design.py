@@ -176,6 +176,22 @@ def update(window,data):
         elif not window.isVisible():
             window.cpu_header.setText('CPU: N/A · N/A')
             window.gpu_header.setText('GPU: N/A · N/A')
+    if hasattr(window, 'fan_cpu_temp_reading') and hasattr(window, 'fan_gpu_temp_reading'):
+        fans_dlg = getattr(window, 'dialogs', {}).get('Fans')
+        if fans_dlg and fans_dlg.isVisible() and data.get('telemetry_sample', True):
+            cpu_t = data.get('cpu_temp')
+            cpu_r = data.get('cpu_fan')
+            gpu_t = data.get('gpu_temp')
+            gpu_r = data.get('gpu_fan')
+            window.fan_cpu_temp_reading.setText(f"{cpu_t}°C" if cpu_t is not None and str(cpu_t) != '0' else "—")
+            window.fan_cpu_fan_reading.setText(f"{int(float(cpu_r)/100+.5)*100} RPM" if cpu_r is not None else "—")
+            window.fan_gpu_temp_reading.setText(f"{gpu_t}°C" if gpu_t is not None and str(gpu_t) != '0' else "—")
+            window.fan_gpu_fan_reading.setText(f"{int(float(gpu_r)/100+.5)*100} RPM" if gpu_r is not None else "—")
+        elif fans_dlg and not fans_dlg.isVisible():
+            window.fan_cpu_temp_reading.setText("—")
+            window.fan_cpu_fan_reading.setText("—")
+            window.fan_gpu_temp_reading.setText("—")
+            window.fan_gpu_fan_reading.setText("—")
     if not window.profile_editors_initialized and hasattr(window,'saved_fan_policies'):
         try:current=int(data.get('profile') or 1)
         except ValueError:current=1
@@ -325,7 +341,8 @@ def finish_control_windows(window):
     window.lighting_target='Keyboard';window.sync_logo=window.settings.value('sync_logo',False,type=bool)
     saved_effect=window.effect.currentText()
     target_states={'Keyboard':dict(colors=list(window.colors),brightness=window.brightness.value(),effect=saved_effect,speed=window.speed.value()),
-                   'Logo':dict(colors=[QColor(window.settings.value('logo_color','#28d8ca'))]*4,brightness=int(window.settings.value('logo_brightness',80)),effect=window.settings.value('logo_effect','Static'),speed=int(window.settings.value('logo_speed',5)))}
+                   'Logo':dict(colors=[QColor(window.settings.value('logo_color','#28d8ca'))]*4,brightness=int(window.settings.value('logo_brightness',80)),effect=window.settings.value('logo_effect','Static'),speed=int(window.settings.value('logo_speed',5))),
+                   'ModeKey':dict(colors=[QColor(window.settings.value('mode_key_color','#00AEC7'))]*4,brightness=int(window.settings.value('mode_key_brightness',100)),effect=window.settings.value('mode_key_effect','Mode'),speed=int(window.settings.value('mode_key_speed',5)))}
     window.lighting_target_states=target_states
     sync_logo=QCheckBox('Sync cover logo with keyboard');window.sync_logo_checkbox=sync_logo;sync_logo.setChecked(window.sync_logo);l.addWidget(sync_logo)
     sync_logo.toggled.connect(lambda enabled:(setattr(window,'sync_logo',enabled),window.settings.setValue('sync_logo',enabled)))
@@ -369,6 +386,24 @@ def finish_control_windows(window):
         button.clicked.connect(lambda checked=False,name=name:(window.set_fan_editor_kind(name),window.apply_fan_policy(True)))
     window.set_fan_editor_kind('Auto')
     channels=QHBoxLayout();cpu=action('CPU Fan','icons8-processor-32.png');gpu=action('GPU Fan','icons8-video-card-32.png');cpu.setCheckable(True);gpu.setCheckable(True);cpu.setChecked(True);channels.addWidget(cpu);channels.addWidget(gpu);f.addLayout(channels)
+
+    # Live telemetry readout banner matching Windows FanCurveWindow.xaml
+    fan_telem_widget = QWidget()
+    fan_telem_layout = QHBoxLayout(fan_telem_widget)
+    fan_telem_layout.setContentsMargins(0, 4, 0, 8)
+    cpu_tb = QWidget(); cpu_tb_l = QHBoxLayout(cpu_tb); cpu_tb_l.setContentsMargins(0, 0, 0, 0); cpu_tb_l.setSpacing(4); cpu_tb_l.addStretch()
+    window.fan_cpu_temp_reading = QLabel('—'); window.fan_cpu_temp_reading.setStyleSheet('font-weight: 600;')
+    dot_c = QLabel('  •  '); dot_c.setObjectName('muted')
+    window.fan_cpu_fan_reading = QLabel('—'); window.fan_cpu_fan_reading.setStyleSheet('font-weight: 600;')
+    cpu_tb_l.addWidget(window.fan_cpu_temp_reading); cpu_tb_l.addWidget(dot_c); cpu_tb_l.addWidget(window.fan_cpu_fan_reading); cpu_tb_l.addStretch()
+    gpu_tb = QWidget(); gpu_tb_l = QHBoxLayout(gpu_tb); gpu_tb_l.setContentsMargins(0, 0, 0, 0); gpu_tb_l.setSpacing(4); gpu_tb_l.addStretch()
+    window.fan_gpu_temp_reading = QLabel('—'); window.fan_gpu_temp_reading.setStyleSheet('font-weight: 600;')
+    dot_g = QLabel('  •  '); dot_g.setObjectName('muted')
+    window.fan_gpu_fan_reading = QLabel('—'); window.fan_gpu_fan_reading.setStyleSheet('font-weight: 600;')
+    gpu_tb_l.addWidget(window.fan_gpu_temp_reading); gpu_tb_l.addWidget(dot_g); gpu_tb_l.addWidget(window.fan_gpu_fan_reading); gpu_tb_l.addStretch()
+    fan_telem_layout.addWidget(cpu_tb); fan_telem_layout.addWidget(gpu_tb)
+    f.addWidget(fan_telem_widget)
+
     editor=QWidget();editor_layout=QVBoxLayout(editor);editor_layout.setContentsMargins(0,0,0,0);editor_layout.setSpacing(8)
     delay_row=SettingSliderRow('Fan Control Delay',0,5,int(window.curve_delay.value()),unit=' s')
     delay_row.slider.setTickInterval(1);delay_row.valueChanged.connect(lambda v:(window.curve_delay.setValue(v),delay_row.label_value.setText(f'{v} s')))
@@ -453,6 +488,17 @@ def finish_control_windows(window):
         sync_stage_rows();fans.adjustSize()
     window.fan_editor_state=fan_editor_state
     refresh_fan_graph(False);fan_editor_state(window.fan_editor_kind);fans.adjustSize()
+
+    def on_fan_show(event):
+        QDialog.showEvent(fans, event)
+        if hasattr(window, 'command'):
+            window.command.emit('fan_window_visible', True)
+    def on_fan_hide(event):
+        if hasattr(window, 'command'):
+            window.command.emit('fan_window_visible', False)
+        QDialog.hideEvent(fans, event)
+    fans.showEvent = on_fan_show
+    fans.hideEvent = on_fan_hide
 
     # Match PreySense.Frontend/Views/ModeSettingsWindow.xaml structure.
     from ui_controls import SettingSwitchRow, SettingSliderRow, SettingValueRow, SettingDropdownRow, RectangularSwitch
@@ -542,6 +588,36 @@ def finish_control_windows(window):
     cpu_panel.setEnabled(False)
     body_l.addWidget(cpu_wrap)
 
+    from gpu_clock_tuning import GpuClockTuning
+    gpu_clocks = GpuClockTuning()
+    window.gpu_clocks = gpu_clocks
+    gpu_oc_wrap, gpu_oc_panel, gpu_oc_l, window.apply_gpu_oc_switch = section('GPU Overclocking', 'icons8-gauge-32.png')
+    window.gpu_oc_wrap = gpu_oc_wrap
+    window.gpu_oc_panel = gpu_oc_panel
+    window.apply_gpu_oc_switch.setChecked(False)
+    window.apply_gpu_oc_switch.setEnabled(gpu_clocks.is_available())
+
+    window.gpu_core_slider = SettingSliderRow('Core Clock Offset', 0, 500, 0, unit=' MHz')
+    window.gpu_mem_slider = SettingSliderRow('Memory Clock Offset', 0, 2000, 0, unit=' MHz')
+    configure_snap(window.gpu_core_slider.slider, 5)
+    configure_snap(window.gpu_mem_slider.slider, 100)
+    for slider in (window.gpu_core_slider, window.gpu_mem_slider):
+        gpu_oc_l.addWidget(slider)
+
+    def on_core_slide(v):
+        window.gpu_core_slider.label_value.setText(f"{'+' if v > 0 else ''}{int(v)} MHz")
+    def on_mem_slide(v):
+        window.gpu_mem_slider.label_value.setText(f"{'+' if v > 0 else ''}{int(v)} MHz")
+    window.gpu_core_slider.valueChanged.connect(on_core_slide)
+    window.gpu_mem_slider.valueChanged.connect(on_mem_slide)
+    on_core_slide(0); on_mem_slide(0)
+
+    window.gpu_core_offset = _SliderValue(window.gpu_core_slider)
+    window.gpu_mem_offset = _SliderValue(window.gpu_mem_slider)
+    window.apply_gpu_oc_switch.toggled.connect(lambda on: gpu_oc_panel.setEnabled(on and gpu_clocks.is_available()))
+    gpu_oc_panel.setEnabled(False)
+    body_l.addWidget(gpu_oc_wrap)
+
     gpu=GpuOffsets(); window.gpu_offsets_available=gpu.available
     gpu_wrap, gpu_panel, gpu_l, window.apply_gpu_switch = section('GPU Power Limits','icons8-video-card-32.png')
     window.apply_gpu_switch.setChecked(False); window.apply_gpu_switch.setEnabled(gpu.available)
@@ -549,9 +625,9 @@ def finish_control_windows(window):
     window.gpu_power_row.setEnabled(False)
     window.gpu_power_row.spin.setSpecialValueText('N/A')
     gpu_l.addWidget(window.gpu_power_row)
-    window.gpu_ct_slider=SettingSliderRow('Delta', 0, 100, 0, unit=' W')
+    window.gpu_ct_slider=SettingSliderRow('Delta', 0, 255, 0, unit=' W')
     window.gpu_db_slider=SettingSliderRow('Dynamic Boost', 0, 25, 0, unit=' W')
-    window.gpu_cp_slider=SettingSliderRow('Platform Power Limit Offset', 0, 100, 0, unit=' W')
+    window.gpu_cp_slider=SettingSliderRow('Platform Power Limit Offset', 0, 255, 0, unit=' W')
     for slider in (window.gpu_ct_slider, window.gpu_db_slider, window.gpu_cp_slider):
         configure_snap(slider.slider, 5)
         gpu_l.addWidget(slider)
@@ -621,6 +697,19 @@ def finish_control_windows(window):
     tuning_footer=QWidget(); tuning_footer.setLayout(footer); gated_l.addWidget(tuning_footer)
     t.addWidget(gated)
 
+    def refresh_tuning_master_switches():
+        enable_boost = bool(window.settings.value('enable_cpu_boost_tuning', True, type=bool))
+        enable_cpu_limits = bool(window.settings.value('enable_cpu_power_limits', False, type=bool))
+        enable_gpu_limits = bool(window.settings.value('enable_gpu_power_limits', False, type=bool))
+        enable_gpu_oc = bool(window.settings.value('enable_gpu_overclocking', False, type=bool))
+
+        window.cpu_boost.setVisible(enable_boost)
+        cpu_wrap.setVisible(enable_cpu_limits)
+        gpu_wrap.setVisible(enable_gpu_limits)
+        gpu_oc_wrap.setVisible(enable_gpu_oc)
+    window.refresh_tuning_master_switches = refresh_tuning_master_switches
+    refresh_tuning_master_switches()
+
     def set_tuning_enabled(enabled):
         window.settings.setValue('tuning_enabled', bool(enabled))
         prochot_block.setEnabled(enabled)
@@ -628,11 +717,17 @@ def finish_control_windows(window):
         if enabled:
             gpu_wrap.setEnabled(gpu.available)
             gpu_panel.setEnabled(gpu.available and window.apply_gpu_switch.isChecked())
+            gpu_oc_wrap.setEnabled(gpu_clocks.is_available())
+            gpu_oc_panel.setEnabled(gpu_clocks.is_available() and window.apply_gpu_oc_switch.isChecked())
             cpu_panel.setEnabled(window.apply_cpu_switch.isChecked())
             if hasattr(window, 'refresh_prochot_ui'):
                 window.refresh_prochot_ui()
+            refresh_tuning_master_switches()
     enable_row.toggled.connect(set_tuning_enabled)
     set_tuning_enabled(enable_row.isChecked())
+
+    from tuning_settings import build_tuning_settings_dialog
+    window.dialogs['TuningSettings'] = build_tuning_settings_dialog(window)
 
     tuning.adjustSize()
     def sync_tuning_on_show(event):

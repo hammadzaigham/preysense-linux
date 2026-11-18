@@ -21,9 +21,10 @@ def default_config_path():
     return base / 'PreySense' / 'preysense.json'
 
 
-def _mode_tuning():
+def _mode_tuning(name=None):
     return {
         'ApplyCpuLimits': False,
+        'ApplyCpuBoost': False,
         'CpuPl1Watts': None,
         'CpuPl2Watts': None,
         'CpuTurboTimeLimitSeconds': None,
@@ -34,6 +35,9 @@ def _mode_tuning():
         'GpuDynamicBoostWatts': None,
         'PlatformPowerOffsetWatts': None,
         'GpuNominalPowerWatts': None,
+        'ApplyGpuClockOffsets': False,
+        'GpuCoreClockOffsetMhz': 100 if name == 'Turbo' else None,
+        'GpuMemoryClockOffsetMhz': 200 if name == 'Turbo' else None,
     }
 
 
@@ -43,6 +47,10 @@ def _mode_fans():
 
 def default_config():
     tuning = {
+        'EnableCpuBoostTuningControl': True,
+        'EnableCpuPowerLimitControl': False,
+        'EnableGpuPowerLimitControl': False,
+        'EnableGpuOverclockingControl': False,
         'ApplyProchotOffset': False,
         'ProchotOffsetCelsius': None,
         'FactoryProchotOffsetCelsius': None,
@@ -53,14 +61,19 @@ def default_config():
         'FactoryStaticCpuPl2Watts': None,
         'FactoryDefaults': {},
     }
-    fans = {}
+    fans = {
+        'ControlDelaySeconds': 0,
+        'CpuMaxRpm': 6400,
+        'GpuMaxRpm': 6400,
+    }
     for name in MODE_NAMES:
-        tuning[name] = _mode_tuning()
+        tuning[name] = _mode_tuning(name)
         fans[name] = _mode_fans()
     return {
         'SchemaVersion': SCHEMA_VERSION,
         'General': {
             'Language': 'en-US',
+            'Theme': 'Dark',
             'LightTheme': False,
             'HardwareTuningEnabled': False,
         },
@@ -78,6 +91,8 @@ def default_config():
         'Tuning': tuning,
         'Fans': fans,
         'Lighting': {
+            'ModeBrightness': 100,
+            'PowerModeColors': {},
             'Keyboard': {
                 'Brightness': 100,
                 'Speed': 5,
@@ -99,9 +114,19 @@ def default_config():
                 'SyncWithKeyboard': False,
                 'EffectTag': 'Static',
             },
+            'ModeKey': {
+                'Enabled': True,
+                'ColorHex': '#00AEC7',
+                'Brightness': 100,
+                'Speed': 5,
+                'SyncWithKeyboard': True,
+                'EffectTag': 'Mode',
+                'PowerModeColors': {},
+            },
         },
         'Overlay': {
             'Enabled': False,
+            'Theme': 'Dark',
             'ScalePercent': 100,
             'BackgroundOpacityPercent': 50,
             'TextOpacityPercent': 100,
@@ -290,6 +315,20 @@ class ConfigStore:
             cover['EffectTag'] = str(val('logo_effect', 'Static'))
         if has('logo_speed'):
             cover['Speed'] = int(val('logo_speed', 5))
+        mode_key_cfg = self.data['Lighting'].setdefault('ModeKey', {
+            'Enabled': True, 'ColorHex': '#00AEC7', 'Brightness': 100, 'Speed': 5,
+            'SyncWithKeyboard': True, 'EffectTag': 'Mode', 'PowerModeColors': {}
+        })
+        if has('mode_key_sync'):
+            mode_key_cfg['SyncWithKeyboard'] = bool(val('mode_key_sync', True))
+        if has('mode_key_color'):
+            mode_key_cfg['ColorHex'] = str(val('mode_key_color', '#00AEC7'))
+        if has('mode_key_brightness'):
+            mode_key_cfg['Brightness'] = int(val('mode_key_brightness', 100))
+        if has('mode_key_effect'):
+            mode_key_cfg['EffectTag'] = str(val('mode_key_effect', 'Mode'))
+        if has('mode_key_speed'):
+            mode_key_cfg['Speed'] = int(val('mode_key_speed', 5))
         ov = self.data['Overlay']
         if has('overlay_visible'):
             ov['Enabled'] = bool(val('overlay_visible', False))
@@ -432,6 +471,16 @@ class JsonSettings:
             return data['Tuning'].get('FactoryTjMaxCelsius')
         if key == 'gpu_base_watts':
             return data['Tuning'].get('GpuBasePowerWatts')
+        if key == 'enable_cpu_boost_tuning':
+            return bool(data['Tuning'].get('EnableCpuBoostTuningControl', True))
+        if key == 'enable_cpu_power_limits':
+            return bool(data['Tuning'].get('EnableCpuPowerLimitControl', False))
+        if key == 'enable_gpu_power_limits':
+            return bool(data['Tuning'].get('EnableGpuPowerLimitControl', False))
+        if key == 'enable_gpu_overclocking':
+            return bool(data['Tuning'].get('EnableGpuOverclockingControl', False))
+        if key == 'gpu_clock_policies':
+            return json.dumps(self._export_gpu_clock_policies())
         if key == 'gpu_policies':
             return json.dumps(self._export_gpu_policies())
         if key == 'auto_refresh':
@@ -451,6 +500,12 @@ class JsonSettings:
             return CODE_TO_NAME.get(str(s.get('BatteryPowerMode', 6)), 'Eco')
         if key == 'fan_policies':
             return json.dumps(self._export_fan_policies())
+        if key == 'fan_control_delay':
+            return int(data['Fans'].get('ControlDelaySeconds', 0) or 0)
+        if key == 'cpu_max_rpm':
+            return int(data['Fans'].get('CpuMaxRpm', 6400) or 6400)
+        if key == 'gpu_max_rpm':
+            return int(data['Fans'].get('GpuMaxRpm', 6400) or 6400)
         if key == 'power_policies':
             return json.dumps(self._export_power_policies())
         if key == 'overlay_visible':
@@ -491,6 +546,19 @@ class JsonSettings:
             return cover.get('EffectTag', 'Static')
         if key == 'logo_speed':
             return int(cover.get('Speed', 5))
+        mode_key_cfg = data['Lighting'].get('ModeKey', {})
+        if key == 'mode_key_sync':
+            return bool(mode_key_cfg.get('SyncWithKeyboard', True))
+        if key == 'mode_key_color':
+            return mode_key_cfg.get('ColorHex', '#00AEC7')
+        if key == 'mode_key_brightness':
+            return int(mode_key_cfg.get('Brightness', 100))
+        if key == 'mode_key_effect':
+            return mode_key_cfg.get('EffectTag', 'Mode')
+        if key == 'mode_key_speed':
+            return int(mode_key_cfg.get('Speed', 5))
+        if key == 'mode_key_colors':
+            return mode_key_cfg.get('PowerModeColors', {})
         if key.startswith('overlay_col_') and key.endswith('_graph'):
             index = int(key[len('overlay_col_'):-len('_graph')]) - 1
             return bool(ov['Slots'][index].get('ShowGraph'))
@@ -521,6 +589,16 @@ class JsonSettings:
             data['Tuning']['FactoryTjMaxCelsius'] = None if value in (None, '') else int(value); return
         if key == 'gpu_base_watts':
             data['Tuning']['GpuBasePowerWatts'] = None if value in (None, '') else int(value); return
+        if key == 'enable_cpu_boost_tuning':
+            data['Tuning']['EnableCpuBoostTuningControl'] = bool(value); return
+        if key == 'enable_cpu_power_limits':
+            data['Tuning']['EnableCpuPowerLimitControl'] = bool(value); return
+        if key == 'enable_gpu_power_limits':
+            data['Tuning']['EnableGpuPowerLimitControl'] = bool(value); return
+        if key == 'enable_gpu_overclocking':
+            data['Tuning']['EnableGpuOverclockingControl'] = bool(value); return
+        if key == 'gpu_clock_policies':
+            self._import_gpu_clock_policies(json.loads(value) if isinstance(value, str) else value); return
         if key == 'gpu_policies':
             self._import_gpu_policies(json.loads(value) if isinstance(value, str) else value); return
         if key == 'auto_refresh':
@@ -540,6 +618,12 @@ class JsonSettings:
             s['BatteryPowerMode'] = MODE_CODES.get(str(value), 6); return
         if key == 'fan_policies':
             self._import_fan_policies(json.loads(value) if isinstance(value, str) else value); return
+        if key == 'fan_control_delay':
+            data['Fans']['ControlDelaySeconds'] = max(0, min(5, int(value))); return
+        if key == 'cpu_max_rpm':
+            data['Fans']['CpuMaxRpm'] = max(1, min(65535, int(value))); return
+        if key == 'gpu_max_rpm':
+            data['Fans']['GpuMaxRpm'] = max(1, min(65535, int(value))); return
         if key == 'power_policies':
             self._import_power_policies(json.loads(value) if isinstance(value, str) else value); return
         if key == 'overlay_visible':
@@ -589,6 +673,22 @@ class JsonSettings:
             cover['EffectTag'] = str(value); return
         if key == 'logo_speed':
             cover['Speed'] = int(value); return
+        mode_key_cfg = data['Lighting'].setdefault('ModeKey', {
+            'Enabled': True, 'ColorHex': '#00AEC7', 'Brightness': 100, 'Speed': 5,
+            'SyncWithKeyboard': True, 'EffectTag': 'Mode', 'PowerModeColors': {}
+        })
+        if key == 'mode_key_sync':
+            mode_key_cfg['SyncWithKeyboard'] = bool(value); return
+        if key == 'mode_key_color':
+            mode_key_cfg['ColorHex'] = str(value); return
+        if key == 'mode_key_brightness':
+            mode_key_cfg['Brightness'] = int(value); return
+        if key == 'mode_key_effect':
+            mode_key_cfg['EffectTag'] = str(value); return
+        if key == 'mode_key_speed':
+            mode_key_cfg['Speed'] = int(value); return
+        if key == 'mode_key_colors':
+            mode_key_cfg['PowerModeColors'] = dict(value) if isinstance(value, dict) else {}; return
         if key.startswith('overlay_col_') and key.endswith('_graph'):
             index = int(key[len('overlay_col_'):-len('_graph')]) - 1
             slots = ov.setdefault('Slots', [])
@@ -709,6 +809,38 @@ class JsonSettings:
                 slot['GpuDynamicBoostWatts'] = int(policy['db'])
             if 'cp' in policy:
                 slot['PlatformPowerOffsetWatts'] = int(policy['cp'])
+
+    def _export_gpu_clock_policies(self):
+        out = {}
+        for name, code in MODE_CODES.items():
+            slot = self.store.data['Tuning'][name]
+            if not slot.get('ApplyGpuClockOffsets'):
+                continue
+            core = slot.get('GpuCoreClockOffsetMhz')
+            mem = slot.get('GpuMemoryClockOffsetMhz')
+            if core is None and mem is None:
+                continue
+            out[str(code)] = {
+                'core': int(core or 0),
+                'mem': int(mem or 0),
+            }
+        return out
+
+    def _import_gpu_clock_policies(self, gpu_clocks):
+        if not isinstance(gpu_clocks, dict):
+            return
+        for name in MODE_NAMES:
+            self.store.data['Tuning'][name]['ApplyGpuClockOffsets'] = False
+        for code, policy in gpu_clocks.items():
+            name = CODE_TO_NAME.get(str(code))
+            if not name or not isinstance(policy, dict):
+                continue
+            slot = self.store.data['Tuning'][name]
+            slot['ApplyGpuClockOffsets'] = True
+            if 'core' in policy:
+                slot['GpuCoreClockOffsetMhz'] = int(policy['core'])
+            if 'mem' in policy:
+                slot['GpuMemoryClockOffsetMhz'] = int(policy['mem'])
 
 
 _MISSING = object()

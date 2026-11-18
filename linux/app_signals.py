@@ -5,7 +5,10 @@ from PySide6.QtCore import QObject,QSocketNotifier
 class SignalWakeup(QObject):
     def __init__(self,parent=None):
         super().__init__(parent)
-        self.reader,self.writer=os.pipe2(os.O_NONBLOCK|os.O_CLOEXEC)
+        if hasattr(os, 'pipe2'):
+            self.reader, self.writer = os.pipe2(os.O_NONBLOCK | os.O_CLOEXEC)
+        else:
+            self.reader, self.writer = os.pipe()
         self.previous=signal.set_wakeup_fd(self.writer)
         self.notifier=QSocketNotifier(self.reader,QSocketNotifier.Read,self)
         self.notifier.activated.connect(self.drain)

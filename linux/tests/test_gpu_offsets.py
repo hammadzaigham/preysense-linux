@@ -10,6 +10,7 @@ class GpuOffsetsTests(unittest.TestCase):
     def test_snap_and_validate(self):
         self.assertEqual(snap(23, 100), 25)
         self.assertEqual(validate(23, 12, 18), (25, 10, 20))
+        self.assertEqual(validate(255, 25, 255), (255, 25, 255))
         self.assertEqual(validate(0, 0), (0, 0, None))
 
     def test_sysfs_read(self):

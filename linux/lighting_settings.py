@@ -24,4 +24,10 @@ def startup_lighting(settings):
         effect=settings.value('logo_effect','Static')
         if effect not in ('Off','Static','Breathing','Neon'):raise ValueError('Unknown saved logo effect')
         commands.append(('logo_lighting',dict(color=rgb(settings.value('logo_color','#28d8ca')),effect=effect,brightness=bounded(settings,'logo_brightness',80,100),speed=bounded(settings,'logo_speed',5,10))))
+    if settings.contains('mode_key_effect') or settings.contains('mode_key_color'):
+        effect=settings.value('mode_key_effect','Mode')
+        if effect not in ('Off','Static','Breathing','Neon','Wave','Zoom','Mode'):raise ValueError('Unknown saved mode key effect')
+        color=rgb(settings.value('mode_key_color','#00AEC7'))
+        sync=settings.value('mode_key_sync',True,type=bool)
+        commands.append(('mode_key_lighting',dict(color=color,effect=effect,brightness=bounded(settings,'mode_key_brightness',100,100),speed=bounded(settings,'mode_key_speed',5,10),sync=sync)))
     return commands

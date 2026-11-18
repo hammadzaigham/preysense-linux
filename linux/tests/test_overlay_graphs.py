@@ -14,7 +14,7 @@ class WindowsGraphTests(unittest.TestCase):
     def setUp(self):
         self.temp=tempfile.TemporaryDirectory()
         self.hud=HardwareOverlay(QSettings(str(Path(self.temp.name)/'prefs'),QSettings.IniFormat))
-        for i in range(8):self.hud.set_column(i,'None','None',False)
+        for i in range(len(self.hud.columns)):self.hud.set_column(i,'None','None',False)
     def tearDown(self):self.hud.close();self.temp.cleanup()
     def test_missing_is_zero_and_memory_uses_windows_mb_units(self):
         self.assertEqual(graph_value({},'Power'),0)

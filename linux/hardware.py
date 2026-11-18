@@ -1,6 +1,13 @@
 """Linux hardware transport. Only explicit, bounded controls are writable."""
 from pathlib import Path
-import fcntl
+try:
+    import fcntl
+except ImportError:
+    class _DummyFcntl:
+        @staticmethod
+        def ioctl(*args, **kwargs):
+            return 0
+    fcntl = _DummyFcntl()
 import json
 import shutil
 import subprocess
@@ -149,6 +156,44 @@ class Hardware:
         off=brightness==0 or effect=='Off'
         packet=bytes([0xa4,0x83,1 if off else effects[effect],0 if off else brightness,0 if off else max(1,min(5,round(speed/2))),0,*(color if not off else (0,0,0)),1,0])
         self._lighting_packets([packet])
+
+    def mode_key_lighting(self, color, brightness=100, effect='Static', speed=5, target=0x65):
+        effects = {'Off': 1, 'Static': 2, 'Breathing': 4, 'Neon': 5, 'Wave': 3, 'Zoom': 8, 'Mode': 2}
+        if effect not in effects or len(color) != 3 or any(type(v) is not int or not 0 <= v <= 255 for v in color) or not 0 <= brightness <= 100 or not 0 <= speed <= 10:
+            raise ValueError('Invalid mode key lighting parameters')
+        from mode_key_lighting import build_mode_key_packet
+        packet = build_mode_key_packet(
+            target=target,
+            mode=effects[effect],
+            brightness=brightness,
+            speed=speed,
+            direction=0,
+            red=color[0],
+            green=color[1],
+            blue=color[2],
+        )
+        self._lighting_packets([packet])
+
+    def discover_per_key_devices(self):
+        try:
+            from per_key_lighting import OemUsbLightingDevice
+            return OemUsbLightingDevice.discover(root=self.root)
+        except Exception:
+            return []
+
+    def per_key_lighting(self, colors, brightness=100):
+        devices = self.discover_per_key_devices()
+        if not devices:
+            raise RuntimeError('No OEM USB per-key keyboard detected')
+        for dev in devices:
+            dev.apply_colors(colors, brightness)
+
+    def per_key_mode(self, mode_id, color, brightness=100, speed=None, direction=0, random_colors=False):
+        devices = self.discover_per_key_devices()
+        if not devices:
+            raise RuntimeError('No OEM USB per-key keyboard detected')
+        for dev in devices:
+            dev.apply_mode(mode_id, color, brightness, speed, direction, random_colors)
 
     def snapshot(self,requested=None):
         wanted=lambda name:requested is None or name in requested

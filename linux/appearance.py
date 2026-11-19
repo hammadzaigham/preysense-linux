@@ -39,14 +39,8 @@ class Appearance:
         self.set_theme(owner.settings.value('theme','Dark'),False)
         self.set_language(owner.settings.value('language','en-US'),False)
     def style(self):
-        import design
-        style=design.STYLE
-        if CURRENT_THEME=='Dark':return style
-        tokens={'#1c1c1c':'WindowBgColor','#2e2e2e':'ButtonMainColor','#242424':'ButtonSecondColor','#383838':'ButtonHoverColor','#373737':'BorderMainColor','#f0f0f0':'TextPrimaryColor','#a8a8a8':'TextSecondaryColor','#787878':'TextMutedColor','#282b32':'ControlTrackColor','#758197':'ControlThumbHoverColor','#5c6576':'ControlThumbColor','#eaeff5':'ControlThumbBorderColor','#4a5260':'ControlTrackFillColor','#8b97af':'ControlThumbPressedColor','#3e4450':'ControlActiveColor'}
-        for original,token in tokens.items():style=style.replace(original,color(token,original))
-        style=style.replace('#424242','#C8CED6').replace('#545454','#B9C0C9').replace('#333333','#D8DDE3')
-        style=style.replace('chevron-dark.svg','chevron-light.svg')
-        return style+'\nQPushButton:checked {background:#E7F3FC;} QGroupBox {background:#FFFFFF;}\n'
+        from design import style_for_theme
+        return style_for_theme(CURRENT_THEME)
     def set_theme(self,name,persist=True):
         global CURRENT_THEME
         if name not in ('Dark','Light'):name='Dark'

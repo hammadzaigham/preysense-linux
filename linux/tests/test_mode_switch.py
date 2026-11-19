@@ -13,40 +13,63 @@ class ModeSwitchTests(unittest.TestCase):
         self.now=10.0;self.calls=[]
         self.switch=ModeSwitch(self.calls.append,clock=lambda:self.now)
     def tearDown(self):self.switch.cancel()
-    def test_full_second_and_early_wakeup(self):
+    def test_first_request_applies_immediately(self):
         self.switch.request(5)
-        self.assertEqual(self.switch.pending,5)
-        self.assertEqual(self.switch.timer.timerType(),Qt.PreciseTimer)
-        self.now=10.999;self.switch.flush()
-        self.assertEqual(self.calls,[]);self.assertTrue(self.switch.timer.isActive())
-        self.now=11;self.switch.flush();self.switch.flush()
-        self.assertEqual(self.calls,[5]);self.assertIsNone(self.switch.pending)
-    def test_latest_request_restarts_deadline(self):
+        self.assertEqual(self.calls, [5])
+        self.assertIsNone(self.switch.pending)
+        self.assertEqual(self.switch.timer.timerType(), Qt.PreciseTimer)
+
+    def test_latest_request_wins_without_extending_window(self):
         self.switch.request(0)
-        self.now=10.8;self.switch.request(1)
-        self.now=11.2;self.switch.request(4)
-        self.now=12.199;self.switch.flush();self.assertFalse(self.calls)
-        self.now=12.2;self.switch.flush();self.assertEqual(self.calls,[4])
-    def test_same_request_also_restarts_quiet_period(self):
-        self.switch.request(6)
-        self.now=10.9;self.switch.request(6)
-        self.now=11;self.switch.flush();self.assertFalse(self.calls)
-        self.now=11.9;self.switch.flush();self.assertEqual(self.calls,[6])
-        self.now=20;self.switch.request(6);self.now=21;self.switch.flush()
-        self.assertEqual(self.calls,[6,6])
-    def test_cancel_clears_timer_and_never_delivers(self):
-        self.switch.request(0);self.switch.cancel();self.now=20;self.switch.flush()
-        self.assertIsNone(self.switch.pending);self.assertFalse(self.switch.timer.isActive());self.assertFalse(self.calls)
-    def test_invalid_modes_do_not_replace_valid_pending(self):
+        self.now = 10.8
         self.switch.request(1)
-        for mode in (True,False,2,3,-1,255,'5',5.0,None,{},[]):
-            with self.assertRaises(ValueError):self.switch.request(mode)
-        self.assertEqual(self.switch.pending,1)
+        self.now = 11.9
+        self.switch.request(4)
+        self.switch.flush()
+        self.assertEqual(self.calls, [0])
+        self.now = 12
+        self.switch.flush()
+        self.assertEqual(self.calls, [0, 4])
+        self.switch.request(6)
+        self.now = 14
+        self.switch.flush()
+        self.assertEqual(self.calls, [0, 4, 6])
+
+    def test_request_for_last_dispatched_mode_drops_trailing_write(self):
+        self.switch.request(6)
+        self.switch.request(0)
+        self.switch.request(6)
+        self.now = 12
+        self.switch.flush()
+        self.assertEqual(self.calls, [6])
+        self.assertFalse(self.switch.timer.isActive())
+
+    def test_cancel_drops_pending_mode(self):
+        self.switch.request(0)
+        self.switch.request(4)
+        self.switch.cancel()
+        self.now = 20
+        self.switch.flush()
+        self.assertEqual(self.calls, [0])
+        self.assertIsNone(self.switch.pending)
+
+    def test_invalid_modes_do_not_replace_valid_pending(self):
+        self.switch.request(4)
+        self.switch.request(1)
+        for mode in (True, False, 2, 3, -1, 255, '5', 5.0, None, {}, []):
+            with self.assertRaises(ValueError):
+                self.switch.request(mode)
+        self.assertEqual(self.switch.pending, 1)
+
     def test_reentrant_request_survives_callback(self):
-        def callback(mode):self.calls.append(mode);self.switch.request(4)
-        self.switch.callback=callback
-        self.switch.request(1);self.now=11;self.switch.flush()
-        self.assertEqual(self.calls,[1]);self.assertEqual(self.switch.pending,4)
+        def callback(mode):
+            self.calls.append(mode)
+            self.switch.request(4)
+        self.switch.callback = callback
+        self.switch.request(1)
+        self.assertEqual(self.calls, [1])
+        self.assertEqual(self.switch.pending, 4)
+
     def test_invalid_clock_does_not_modify_request(self):
         for value in (True,float('nan'),float('inf'),None):
             self.now=value

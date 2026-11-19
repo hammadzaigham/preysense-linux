@@ -1,10 +1,13 @@
 """Qt rendering of the existing PreySense WPF shell, tokens, icons and navigation."""
 from pathlib import Path
-from PySide6.QtCore import Qt, QSize
+import re
+from PySide6.QtCore import Qt, QSize, QTimer
 from PySide6.QtGui import QIcon, QPixmap, QPainter, QColor, QFont
 from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import QWidget,QVBoxLayout,QHBoxLayout,QLabel,QPushButton,QDialog,QComboBox,QApplication,QSlider,QSizePolicy
+from appearance import PALETTE
 from hardware import MODES
+from mode_key_lighting import SLOTS
 from version import __version__
 
 ASSETS=Path(__file__).resolve().parent/'assets'
@@ -96,6 +99,8 @@ def build(window):
         if name=='Hybrid':glyph.setProperty('assetPixmap',None);glyph.setProperty('modeSvg','HybridGpu');glyph.setProperty('modeSize',20);glyph.setPixmap(mode_pixmap('HybridGpu',20))
         label=QLabel(name);label.setAlignment(Qt.AlignCenter);label.setWordWrap(True);label.setObjectName('tileText');inner.addWidget(label)
         tile.setObjectName('modeTile');tile.setCheckable(True)
+        if name == 'NVIDIA GPU Only':
+            tile.setProperty('modeName', 'Performance')
         for child in (glyph,label):child.setAttribute(Qt.WA_TransparentForMouseEvents)
         tile.setEnabled(False)
         tile.clicked.connect(lambda checked=False,name=name:window.stage_gpu_mode(name))
@@ -191,25 +196,19 @@ def update(window,data):
             window.fan_cpu_fan_reading.setText("—")
             window.fan_gpu_temp_reading.setText("—")
             window.fan_gpu_fan_reading.setText("—")
-    if not window.profile_editors_initialized and hasattr(window,'saved_fan_policies'):
-        try:current=int(data.get('profile') or 1)
-        except ValueError:current=1
-        for combo in (window.fan_profile,window.power_profile):
+    if not window.profile_editors_initialized and hasattr(window, 'saved_fan_policies'):
+        try:
+            current = int(data.get('profile'))
+        except (TypeError, ValueError):
+            current = 1
+        combo = window.fan_profile
+        index = combo.findData(current)
+        if index >= 0 and not window.dialogs['Fans'].isVisible():
             combo.blockSignals(True)
-            index=combo.findData(current)
-            if index>=0:combo.setCurrentIndex(index)
+            combo.setCurrentIndex(index)
             combo.blockSignals(False)
-        window.load_fan_policy();window.load_power_policy();window.profile_editors_initialized=True
-    elif hasattr(window,'power_profile') and not window.power_profile.hasFocus():
-        try:current=int(data.get('profile') or 1)
-        except ValueError:current=1
-        if window.power_profile.currentData() != current:
-            idx = window.power_profile.findData(current)
-            if idx >= 0:
-                window.power_profile.blockSignals(True)
-                window.power_profile.setCurrentIndex(idx)
-                window.power_profile.blockSignals(False)
-                window.load_power_policy()
+            window.load_fan_policy()
+        window.profile_editors_initialized = True
     window.original_auto.setChecked(window.refresh_auto.isChecked());window.original_auto.setEnabled(window.refresh_auto.isEnabled())
     display=data.get('display')
     current=next((m for m in display['modes'] if m['id']==display['current']),None) if display else None
@@ -223,10 +222,10 @@ def update(window,data):
     # Keep display headers clean matching WPF
     pass
 
-STYLE='''
-QWidget { background:#1c1c1c; color:#f0f0f0; font-size:12px; }
-QWidget#shell { border:1px solid #1c1c1c; border-radius:8px; }
-QDialog[preysenseShell="true"] { border:1px solid #1c1c1c; border-radius:8px; }
+_STYLE_TEMPLATE='''
+QWidget { background:@WindowBgColor@; color:@TextPrimaryColor@; font-size:12px; }
+QWidget#shell { border:1px solid @WindowBgColor@; border-radius:8px; }
+QDialog[preysenseShell="true"] { border:1px solid @WindowBgColor@; border-radius:8px; }
 QWidget#preysenseTitleBar { background:transparent; }
 QLabel#windowBrand,QLabel#windowSubtitle { font-size:12px; font-weight:600; }
 QLabel#sectionTitle { font-size:13px; font-weight:600; }
@@ -235,52 +234,68 @@ QPushButton#windowCloseButton { background:transparent; border:none; border-top-
 QPushButton#windowCloseButton:hover { background:#c42b1c; color:#ffffff; }
 QPushButton#windowCloseButton:pressed { background:#a62519; color:#ffffff; }
 
-QPushButton,QComboBox { background:#2e2e2e; border:1px solid #424242; border-radius:4px; padding:0 7px; }
-QPushButton:hover { background:#383838; border-color:#545454; }
-QPushButton:pressed { background:#242424; }
-QPushButton:checked { background:#2e2e2e; border:2px solid #3aaeef; }
-QPushButton[modeName="Eco"]:checked { border-color:#06b48a; }
-QPushButton[modeName="Quiet"]:checked { border-color:#d2d2d2; }
-QPushButton[modeName="Performance"]:checked { border-color:#9333ea; }
-QPushButton[modeName="Turbo"]:checked { border-color:#ff2020; }
-QPushButton:disabled,QComboBox:disabled { color:#787878; background:#242424; border-color:#333333; }
+QPushButton,QComboBox { background:@ButtonMainColor@; border:1px solid @ControlBorderColor@; border-radius:4px; padding:0 7px; }
+QPushButton:hover { background:@ButtonHoverColor@; border-color:@HoverBorderColor@; }
+QPushButton:pressed { background:@ButtonSecondColor@; }
+QPushButton:checked { background:@SelectedTileColor@; border:2px solid @ControlFocusedBorderColor@; }
+QPushButton:disabled,QComboBox:disabled { color:@TextMutedColor@; background:@DisabledControlColor@; border-color:@BorderSecondColor@; }
 QPushButton#modeTile { padding:0; } QLabel#tileText { background:transparent; font-size:11px; }
-QLabel { background:transparent; } QLabel:disabled { color:#787878; } QLabel#sensor { font-size:11px; }
-QPushButton#titleButton { background:transparent; border:none; color:#a8a8a8; font-size:16px; font-weight:bold; padding:0; border-radius:4px; }
-QPushButton#titleButton:hover { background:#383838; color:#f0f0f0; }
-QPushButton#titleButton:pressed { background:#242424; }
+QLabel { background:transparent; } QLabel:disabled { color:@TextMutedColor@; } QLabel#sensor { font-size:11px; }
+QPushButton#titleButton { background:transparent; border:none; color:@TextSecondaryColor@; font-size:16px; font-weight:bold; padding:0; border-radius:4px; }
+QPushButton#titleButton:hover { background:@ButtonHoverColor@; color:@TextPrimaryColor@; }
+QPushButton#titleButton:pressed { background:@ButtonSecondColor@; }
 QPushButton#titleButton[text="×"]:hover, QPushButton#titleButton[text="✕"]:hover { background:#e81123; color:#ffffff; }
 QPushButton#titleButton[text="×"]:pressed, QPushButton#titleButton[text="✕"]:pressed { background:#f1707a; color:#ffffff; }
-QLabel#status { color:#a8a8a8; font-size:10px; }
-QFrame[preysenseSeparator="true"] { background:#373737; border:none; }
-QDialog { background:#1c1c1c; }
-QGroupBox { border:1px solid #373737; border-radius:6px; margin-top:12px; padding:12px; }
+QLabel#status { color:@TextSecondaryColor@; font-size:10px; }
+QFrame[preysenseSeparator="true"] { background:@SeparatorColor@; border:none; }
+QDialog { background:@WindowBgColor@; }
+QGroupBox { border:1px solid @BorderMainColor@; border-radius:6px; margin-top:12px; padding:12px; }
 QGroupBox::title { subcontrol-origin:margin; left:12px; }
-QLineEdit,QSpinBox,QDoubleSpinBox,QPlainTextEdit { background:#2e2e2e; border:1px solid #424242; border-radius:4px; padding:0 8px; min-height:26px; height:26px; color:#f0f0f0; }
-QLineEdit:hover,QSpinBox:hover,QDoubleSpinBox:hover { background:#383838; border-color:#545454; }
-QLineEdit:focus,QSpinBox:focus,QDoubleSpinBox:focus { background:#2e2e2e; border:1px solid #3aaeef; }
-QLineEdit:disabled,QSpinBox:disabled,QDoubleSpinBox:disabled { color:#787878; background:#242424; border-color:#333333; }
+QLineEdit,QSpinBox,QDoubleSpinBox,QPlainTextEdit { background:@ButtonMainColor@; border:1px solid @ControlBorderColor@; border-radius:4px; padding:0 8px; min-height:26px; height:26px; color:@TextPrimaryColor@; }
+QLineEdit:hover,QSpinBox:hover,QDoubleSpinBox:hover { background:@ButtonHoverColor@; border-color:@HoverBorderColor@; }
+QLineEdit:focus,QSpinBox:focus,QDoubleSpinBox:focus { background:@ButtonMainColor@; border:1px solid @ControlFocusedBorderColor@; }
+QLineEdit:disabled,QSpinBox:disabled,QDoubleSpinBox:disabled { color:@TextMutedColor@; background:@DisabledControlColor@; border-color:@BorderSecondColor@; }
 QSpinBox::up-button, QSpinBox::down-button, QDoubleSpinBox::up-button, QDoubleSpinBox::down-button { width:0px; height:0px; border:none; }
-QComboBox { min-height:26px; height:26px; padding:0 10px; background:#2e2e2e; border:1px solid #424242; border-radius:4px; }
-QComboBox:hover { background:#383838; border-color:#545454; }
-QComboBox:focus { border:1px solid #3aaeef; }
+QComboBox { min-height:26px; height:26px; padding:0 10px; background:@ButtonMainColor@; border:1px solid @ControlBorderColor@; border-radius:4px; }
+QComboBox:hover { background:@ButtonHoverColor@; border-color:@HoverBorderColor@; }
+QComboBox:focus { border:1px solid @ControlFocusedBorderColor@; }
 QComboBox::drop-down { subcontrol-origin:padding; subcontrol-position:top right; width:22px; border:none; }
 QComboBox::down-arrow { image:url(__CHEVRON__); width:8px; height:5px; border:none; }
 
 QSlider:horizontal { min-height:24px; padding:0 2px; }
-QSlider::groove:horizontal { height:5px; background:#282b32; border-radius:2px; }
-QSlider::sub-page:horizontal { background:#4a5260; border-radius:2px; }
-QSlider::handle:horizontal { width:12px; height:12px; margin:-5px 0 -6px 0; background:#5c6576; border:2px solid #eaeff5; border-radius:8px; }
-QSlider::handle:horizontal:hover { background:#758197; border:2px solid #ffffff; }
-QSlider::handle:horizontal:pressed { background:#8b97af; border:2px solid #ffffff; }
+QSlider::groove:horizontal { height:5px; background:@ControlTrackColor@; border-radius:2px; }
+QSlider::sub-page:horizontal { background:@ControlTrackFillColor@; border-radius:2px; }
+QSlider::handle:horizontal { width:12px; height:12px; margin:-5px 0 -6px 0; background:@ControlThumbColor@; border:2px solid @ControlThumbBorderColor@; border-radius:8px; }
+QSlider::handle:horizontal:hover { background:@ControlThumbHoverColor@; border:2px solid #ffffff; }
+QSlider::handle:horizontal:pressed { background:@ControlThumbPressedColor@; border:2px solid #ffffff; }
 QScrollArea { border:none; }
 QScrollBar:vertical { background:transparent; width:5px; margin:0; }
-QScrollBar::handle:vertical { background:#758197; min-height:24px; border-radius:2px; }
+QScrollBar::handle:vertical { background:@ControlThumbHoverColor@; min-height:24px; border-radius:2px; }
 QScrollBar::add-line:vertical,QScrollBar::sub-line:vertical { height:0; }
 QScrollBar::add-page:vertical,QScrollBar::sub-page:vertical { background:transparent; }
-QHeaderView::section { background:#242424; color:#a8a8a8; border:1px solid #373737; padding:7px; }
-QTableWidget { border:1px solid #373737; gridline-color:#373737; }
-'''.replace('__CHEVRON__',str(Path(__file__).parent/'assets/chevron-dark.svg'))
+QHeaderView::section { background:@ButtonSecondColor@; color:@TextSecondaryColor@; border:1px solid @BorderMainColor@; padding:7px; }
+QTableWidget { border:1px solid @BorderMainColor@; gridline-color:@BorderMainColor@; }
+'''
+
+def style_for_theme(theme):
+    light = theme == 'Light'
+    tokens = {key: shades[theme] for key, shades in PALETTE.items()}
+    tokens.update(
+        ControlBorderColor='#C8CED6' if light else tokens['BorderMainColor'],
+        HoverBorderColor='#B9C0C9' if light else tokens['BorderMainColor'],
+        SelectedTileColor='#E7F3FC' if light else tokens['ButtonMainColor'],
+    )
+    chevron = ASSETS / ('chevron-light.svg' if light else 'chevron-dark.svg')
+    style = re.sub(r'@(\w+)@', lambda match: tokens[match[1]], _STYLE_TEMPLATE)
+    mode_borders = '\n'.join(
+        f'QPushButton[modeName="{name}"]:checked {{ border-color:{border}; }}'
+        for _, name, border in SLOTS
+    )
+    return style.replace('__CHEVRON__', str(chevron)) + mode_borders
+
+
+STYLE = style_for_theme('Dark')
+
 
 def finish_control_windows(window):
     """Retain the original Lighting wheel and Fans graph rather than a generic form."""
@@ -673,6 +688,9 @@ def finish_control_windows(window):
     tuning_status.setWordWrap(True)
     tuning_status.hide()
     window.tuning_status = tuning_status
+    window._tuning_status_timer = QTimer(tuning)
+    window._tuning_status_timer.setSingleShot(True)
+    window._tuning_status_timer.timeout.connect(lambda: window.set_tuning_status(''))
     gated_l.addWidget(tuning_status)
 
     footer=QHBoxLayout(); reset=action('Reset'); reset.clicked.connect(window.reset_power_policy)
@@ -701,6 +719,7 @@ def finish_control_windows(window):
 
     def select_tuning_profile(_index):
         nonlocal selected_mode
+        window.set_tuning_status('')
         drafts[selected_mode] = (
             window.cpu_boost.isChecked(),
             window.apply_cpu_switch.isChecked(), window.power_pl1.value(),
@@ -726,15 +745,20 @@ def finish_control_windows(window):
 
     window.power_profile.currentIndexChanged.connect(select_tuning_profile)
     tuning.adjustSize()
+    selected_initial_mode = False
+
     def sync_tuning_on_show(event):
-        nonlocal selected_mode
+        nonlocal selected_mode, selected_initial_mode
         drafts.clear()
-        current = getattr(window, '_confirmed_profile', None)
-        index = window.power_profile.findData(current)
-        if index >= 0:
-            window.power_profile.blockSignals(True)
-            window.power_profile.setCurrentIndex(index)
-            window.power_profile.blockSignals(False)
+        window.set_tuning_status('')
+        if not selected_initial_mode:
+            current = getattr(window, '_confirmed_profile', None)
+            index = window.power_profile.findData(current)
+            if index >= 0:
+                window.power_profile.blockSignals(True)
+                window.power_profile.setCurrentIndex(index)
+                window.power_profile.blockSignals(False)
+            selected_initial_mode = True
         selected_mode = window.power_profile.currentData()
         window.load_power_policy()
         QDialog.showEvent(tuning,event)

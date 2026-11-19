@@ -1,8 +1,8 @@
 # Fedora RPM packaging
 
-PreySense1.0.0 builds as an x86_64 Fedora RPM plus source RPM. The app version and internal DKMS bridge2.5.0 are intentionally independent.
+PreySense 1.1.0 builds as an x86_64 Fedora RPM plus source RPM. The app version and internal DKMS bridge 2.5.0 are intentionally independent.
 
-[Download the Fedora 45 x86_64 RPM](https://github.com/hammadzaigham/preysense-linux/releases/download/v1.0.0/preysense-1.0.0-1.fc45.x86_64.rpm).
+[Download the Fedora 45 x86_64 RPM](https://github.com/hammadzaigham/preysense-linux/releases/download/v1.1.0/preysense-1.1.0-1.fc45.x86_64.rpm).
 
 ## Build
 
@@ -17,7 +17,7 @@ The builder stages only source/assets, builds in a temporary directory, and neve
 ## Install
 
 ```sh
-sudo dnf install ./preysense-1.0.0-1.fc45.x86_64.rpm
+sudo dnf install ./preysense-1.1.0-1.fc45.x86_64.rpm
 preysense-setup
 preysense
 ```

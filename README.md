@@ -10,11 +10,11 @@ Tested on the **Acer Predator Helios Neo 16S (PHN16S-71)** on Fedora KDE.
 
 ### Fedora (RPM)
 
-Download the latest RPM from [Releases](https://github.com/hammadzaigham/preysense-linux/releases/tag/v1.0.0):
+Download the latest RPM from [Releases](https://github.com/hammadzaigham/preysense-linux/releases/tag/v1.1.0):
 
 ```sh
 cd ~/Downloads
-sudo dnf install ./preysense-1.0.0-1.fc45.x86_64.rpm
+sudo dnf install ./preysense-1.1.0-1.fc45.x86_64.rpm
 preysense-setup
 preysense
 ```

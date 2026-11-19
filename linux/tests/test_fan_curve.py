@@ -4,7 +4,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from fan_curve import (
     FanCurve, FanCurveFollower, default_stages, rpm_to_duty, CPU_MAX_RPM,
-    compact_stages, build_graph,
+    compact_stages, build_graph, default_request_stages, estimated_rpm,
 )
 class FollowerTests(unittest.TestCase):
     def balanced(self):
@@ -66,6 +66,24 @@ class FollowerTests(unittest.TestCase):
             [s['CpuTargetRpm'] for s in default_stages(0)],
             [s['CpuTargetRpm'] for s in default_stages(6)],
         )
+
+    def test_new_curves_preserve_factory_trips_with_no_extra_cooling(self):
+        for mode in (0, 1, 4, 5, 6):
+            with self.subTest(mode=mode):
+                stages = default_request_stages(mode)
+                self.assertEqual([s['CpuRiseC'] for s in stages],
+                                 [s['CpuRiseC'] for s in default_stages(mode)])
+                self.assertEqual([s['GpuRiseC'] for s in stages],
+                                 [s['GpuRiseC'] for s in default_stages(mode)])
+                self.assertTrue(all(s['CpuDutyPercent'] == s['GpuDutyPercent'] == 0 for s in stages))
+                self.assertEqual(FanCurve(mode=mode).target(cpu_temp=90, gpu_temp=85), (0, 0))
+
+    def test_estimated_rpm_uses_firmware_headroom_at_selected_temperature(self):
+        self.assertEqual(estimated_rpm(1, 55, 0), 0)
+        self.assertEqual(estimated_rpm(1, 56, 0), 1800)
+        self.assertEqual(estimated_rpm(1, 56, 50), 4100)
+        self.assertEqual(estimated_rpm(1, 50, 50, gpu=True), 4100)
+        self.assertEqual(estimated_rpm(1, 56, 100), 6400)
 
     def test_independent_fan_duties(self):
         curve = FanCurve(stages=self.balanced(), delay=0)

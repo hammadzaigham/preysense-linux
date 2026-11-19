@@ -1,9 +1,4 @@
-"""Windows-parity EC-style fan stages and shared delay follower.
-
-Matches PreySense.Core FanStage / FanCurveFollower / FanCurveProfile:
-advance on CPU or GPU rise, retreat when both sensors clear the previous rise,
-optional 0–5 s shared delay, both fans commanded at max(cpu_duty, gpu_duty).
-"""
+"""Factory fan references and independently followed CPU and GPU boost curves."""
 from __future__ import annotations
 
 import math
@@ -103,8 +98,32 @@ _TURBO = (
 
 
 def default_stages(mode=1):
+    """Factory RPM and temperature reference for the selected firmware profile."""
     table = {5: _TURBO, 4: _PERFORMANCE, 0: _QUIET_ECO, 6: _QUIET_ECO}.get(int(mode), _BALANCED)
     return [dict(s) for s in table]
+
+
+def default_request_stages(mode=1):
+    """Use the factory temperature ladder with no extra cooling requested."""
+    return [
+        dict(stage, CpuDutyPercent=0, GpuDutyPercent=0, CpuTargetRpm=0, GpuTargetRpm=0)
+        for stage in default_stages(mode)
+    ]
+
+
+def estimated_rpm(mode, temperature, boost, gpu=False):
+    """Minimum steady-state factory estimate, rounded as in the Windows editor."""
+    stages = default_stages(mode)
+    rise_key = 'GpuRiseC' if gpu else 'CpuRiseC'
+    rpm_key = 'GpuTargetRpm' if gpu else 'CpuTargetRpm'
+    last = next(i for i, stage in enumerate(stages)
+                if stage['CpuRiseC'] == stage['GpuRiseC'] == DISABLED_TRIP)
+    first = 0
+    while first < last and stages[first][rise_key] < DISABLED_TRIP and temperature >= stages[first][rise_key]:
+        first += 1
+    baseline = min(stage[rpm_key] for stage in stages[first:last + 1])
+    rpm = baseline + (stages[-1][rpm_key] - baseline) * boost // 100
+    return (rpm + 50) // 100 * 100
 
 
 def normalize_stage(raw):
@@ -139,7 +158,7 @@ def normalize_stage(raw):
 
 
 def normalize_stages(stages, mode=1):
-    result = default_stages(mode)
+    result = default_request_stages(mode)
     if not stages:
         return result
     if not isinstance(stages, (list, tuple)) or not stages:
@@ -349,9 +368,7 @@ class FanCurveFollower:
 class FanCurve:
     """Custom fan policy backed by EC-style stages (Windows follower semantics)."""
 
-    def __init__(self, stages=None, delay=2, mode=1):
-        if stages is None:
-            stages = default_stages(mode)
+    def __init__(self, stages=None, delay=0, mode=1):
         if type(delay) not in (int, float) or not math.isfinite(delay) or not 0 <= float(delay) <= 5:
             raise ValueError('Delay must be 0–5 seconds')
         self.stages = normalize_stages(stages, mode)

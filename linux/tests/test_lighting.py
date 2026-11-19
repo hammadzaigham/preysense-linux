@@ -43,6 +43,12 @@ class LogoTests(unittest.TestCase):
      self.assertEqual(ioctl.call_args.args[2][6:9],bytes([50,100,20]))
    finally:
     h.close_lighting()
+ def test_wave_direction_uses_windows_native_values(self):
+  h=Hardware()
+  with patch.object(h,'_lighting_packets') as send:
+   for direction,value in enumerate((2,1,3,4)):
+    h.lighting([(1,2,3)]*4,effect='Wave',direction=direction)
+    self.assertEqual(send.call_args.args[0][0][5],value)
  def test_logo_average_uses_all_four_zones(self):
   from hardware import average_color
   self.assertEqual(average_color([(100,0,0),(0,100,0),(0,0,100),(100,100,100)]),(50,50,50))

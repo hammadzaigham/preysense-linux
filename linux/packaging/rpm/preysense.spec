@@ -1,6 +1,6 @@
 %global debug_package %{nil}
 Name:           preysense
-Version:        1.0.0
+Version:        1.1.0
 Release:        1%{?dist}
 Summary:        Acer Predator hardware controls for Linux
 License:        MIT AND GPL-2.0-only
@@ -111,5 +111,8 @@ udevadm trigger --subsystem-match=hidraw || :
 /usr/lib/udev/hwdb.d/90-preysense-keyboard.hwdb
 
 %changelog
+* Thu Nov 19 2026 PreySense developers - 1.1.0-1
+- Update lighting, tuning and fan controls and add keyboard brightness shortcuts.
+
 * Fri Nov 06 2026 PreySense developers - 1.0.0-1
 - Initial Fedora RPM with DKMS source.

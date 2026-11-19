@@ -6,9 +6,9 @@ Turbo/Eco names. Invalid inputs do not show a notification. This widget performs
 no hardware reads or writes; callers must pass a confirmed state change.
 
 The port follows `Views/ModeToastWindow.xaml` and its code-behind: 160–220 logical
-pixels wide, 40 high, 20px corners, 18px existing mode icon, 9px text gap and 14px
-medium label. Colors follow the source's Eco, Accent, Performance and Turbo
-colors. Fade in takes 150ms, the visible hold lasts 1800ms, and fade out takes
+pixels wide, 40 high, 20px corners, 18px existing mode icon, 9px text gap and 12px
+medium label. The pill, text and monochrome icon use the app’s Light and Dark
+theme colors. Fade in takes 150ms, the visible hold lasts 1800ms, and fade out takes
 250ms. A new confirmed mode cancels the preceding fade/hold and restarts the
 notification. The toast centers on the owner's monitor, 72 physical pixels above
 its available work area's bottom, accounting for display scale.

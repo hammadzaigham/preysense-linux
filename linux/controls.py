@@ -83,7 +83,7 @@ class FanGraph(QWidget):
         self.origin = None
         self.start_duty = 0
         self.start_celsius = 0
-        self.setMinimumSize(440, 260)
+        self.setMinimumSize(440, 230)
         self.setFocusPolicy(Qt.StrongFocus)
         self.setMouseTracking(True)
         self.setAccessibleName('Fan curve')

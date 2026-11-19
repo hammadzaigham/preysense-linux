@@ -34,6 +34,7 @@ static struct delayed_work fan_watchdog;
 
 /* Expose dedicated shortcuts and aggregate idle time, never ordinary key identities. */
 static atomic_t predator_events = ATOMIC_INIT(0);
+static atomic_t keyboard_brightness_steps = ATOMIC_INIT(0);
 static atomic64_t keyboard_activity_ns;
 static DEFINE_SPINLOCK(shortcut_gate);
 static bool predator_held, predator_combo;
@@ -44,6 +45,7 @@ static void shortcut_notify_fn(struct work_struct *work)
 {
     sysfs_notify(&pdev->dev.kobj, NULL, "predator_events");
     sysfs_notify(&pdev->dev.kobj, NULL, "shortcut_events");
+    sysfs_notify(&pdev->dev.kobj, NULL, "keyboard_brightness_steps");
 }
 static bool preysense_key_filter(struct input_handle *handle, unsigned int type,
                                 unsigned int code, int value)
@@ -53,6 +55,15 @@ static bool preysense_key_filter(struct input_handle *handle, unsigned int type,
     int index;
     if (type != EV_KEY) return false;
     if (value == 1) atomic64_set(&keyboard_activity_ns, ktime_get_boottime_ns());
+    if (handle->dev->id.bustype == BUS_I2C &&
+        handle->dev->id.vendor == 0x1025 && handle->dev->id.product == 0x174b &&
+        (code == KEY_KBDILLUMDOWN || code == KEY_KBDILLUMUP)) {
+        if (value == 1) {
+            atomic_add(code == KEY_KBDILLUMUP ? 1 : -1, &keyboard_brightness_steps);
+            schedule_work(&shortcut_notify_work);
+        }
+        return false;
+    }
     spin_lock_irqsave(&shortcut_gate, flags);
     if (handle->private && code == KEY_PROG3) {
         filtered = true;
@@ -149,6 +160,11 @@ static ssize_t shortcut_events_show(struct device *dev, struct device_attribute 
     return sysfs_emit(buf, "%u %u %u\n", serial, number, overlay);
 }
 static DEVICE_ATTR_RO(shortcut_events);
+static ssize_t keyboard_brightness_steps_show(struct device *dev, struct device_attribute *a, char *buf)
+{
+    return sysfs_emit(buf, "%d\n", atomic_read(&keyboard_brightness_steps));
+}
+static DEVICE_ATTR_RO(keyboard_brightness_steps);
 static ssize_t keyboard_idle_ms_show(struct device *dev, struct device_attribute *a, char *buf)
 {
     u64 idle = ktime_get_boottime_ns() - atomic64_read(&keyboard_activity_ns);
@@ -787,7 +803,7 @@ static struct attribute *preysense_attrs[] = { &dev_attr_profile.attr, &dev_attr
 	&dev_attr_cpu_temp.attr, &dev_attr_gpu_temp.attr, &dev_attr_cpu_fan.attr, &dev_attr_gpu_fan.attr, &dev_attr_cpu_vid_mv.attr,
 	&dev_attr_cpu_prochot.attr,
 	&dev_attr_gpu_offsets.attr, &dev_attr_gpu_offsets_available.attr, &dev_attr_factory_profiles.attr,
-	&dev_attr_battery_limit.attr, &dev_attr_fan_duty.attr, &dev_attr_boot_sound.attr, &dev_attr_led_timeout.attr, &dev_attr_usb_charging.attr, &dev_attr_lcd_overdrive.attr, &dev_attr_predator_events.attr, &dev_attr_event_notifications.attr, &dev_attr_predator_down.attr, &dev_attr_keyboard_idle_ms.attr, &dev_attr_shortcut_events.attr, &dev_attr_gpu_mux.attr, NULL };
+	&dev_attr_battery_limit.attr, &dev_attr_fan_duty.attr, &dev_attr_boot_sound.attr, &dev_attr_led_timeout.attr, &dev_attr_usb_charging.attr, &dev_attr_lcd_overdrive.attr, &dev_attr_predator_events.attr, &dev_attr_event_notifications.attr, &dev_attr_predator_down.attr, &dev_attr_keyboard_idle_ms.attr, &dev_attr_shortcut_events.attr, &dev_attr_keyboard_brightness_steps.attr, &dev_attr_gpu_mux.attr, NULL };
 ATTRIBUTE_GROUPS(preysense);
 
 static int __init preysense_init(void)

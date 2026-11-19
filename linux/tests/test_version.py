@@ -7,4 +7,4 @@ from version import __version__
 
 class VersionTests(unittest.TestCase):
     def test_application_release_version(self):
-        self.assertEqual(__version__,'1.0.0')
+        self.assertEqual(__version__,'1.1.0')

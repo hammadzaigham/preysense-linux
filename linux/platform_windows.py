@@ -154,8 +154,12 @@ def build_platform_windows(window):
 
     row_lighting_settings = SettingActionRow("Lighting Settings", action_text="Open")
     def open_lighting_settings():
-        if hasattr(window, 'dialogs') and 'Lighting' in window.dialogs:
-            window.dialogs['Lighting'].show()
+        from lighting_ui import build_lighting_settings_window
+        if 'LightingSettings' not in window.dialogs:
+            window.dialogs['LightingSettings'] = build_lighting_settings_window(window, settings_dialog)
+        dialog = window.dialogs['LightingSettings']
+        dialog.refresh()
+        dialog.open()
     row_lighting_settings.clicked.connect(open_lighting_settings)
     s_layout.addWidget(row_lighting_settings)
     window._row_lighting_settings = row_lighting_settings

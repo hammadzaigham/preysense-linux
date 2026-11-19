@@ -1,13 +1,11 @@
 """Confirmed performance-mode toast, ported from Views/ModeToastWindow."""
-from pathlib import Path
 from PySide6.QtCore import Qt, QTimer, QRectF, QPropertyAnimation, QEasingCurve, Property
-from PySide6.QtGui import QColor, QPainter, QPen, QFont, QFontMetrics, QPixmap, QCursor
-from PySide6.QtSvg import QSvgRenderer
+from PySide6.QtGui import QColor, QPainter, QFont, QFontMetrics, QPixmap, QCursor
 from PySide6.QtWidgets import QWidget, QApplication
+from appearance import color, translate
+from icon_assets import svg_mode_pixmap
 
 MODE_NAMES = {0: 'Quiet', 1: 'Balanced', 4: 'Performance', 5: 'Turbo', 6: 'Eco'}
-MODE_COLORS = {'Quiet': '#06B48A', 'Eco': '#06B48A', 'Balanced': '#3AAEEF',
-               'Performance': '#9333EA', 'Turbo': '#FF2020'}
 
 
 def toast_position(work_area, width, height, device_pixel_ratio):
@@ -32,6 +30,7 @@ class ModeToast(QWidget):
         self.setFocusPolicy(Qt.NoFocus)
         self.setFixedHeight(40)
         self.mode_name = 'Balanced'
+        self.label_text = self.mode_name
         self._opacity = 1.0
         self.hide_timer = QTimer(self)
         self.hide_timer.setSingleShot(True)
@@ -40,8 +39,9 @@ class ModeToast(QWidget):
         self._fading_out=False
         self.animation=QPropertyAnimation(self,b'toastOpacity',self)
         self.animation.finished.connect(self._animation_finished)
-        self.label_font = QFont('Segoe UI')
-        self.label_font.setPixelSize(14)
+        self.label_font = QFont()
+        self.label_font.setFamilies(['Segoe UI', 'sans-serif'])
+        self.label_font.setPixelSize(12)
         self.label_font.setWeight(QFont.Medium)
         self._icon = QPixmap()
 
@@ -52,7 +52,7 @@ class ModeToast(QWidget):
 
     def show_mode(self, mode):
         name = MODE_NAMES.get(mode) if type(mode) is int else mode
-        if not isinstance(name, str) or name not in MODE_COLORS:
+        if not isinstance(name, str) or name not in MODE_NAMES.values():
             return False
         self.hide_timer.stop();self.animation.stop();self._fading_out=False
         self.mode_name = name
@@ -64,18 +64,9 @@ class ModeToast(QWidget):
             screen = QApplication.screenAt(QCursor.pos()) or QApplication.primaryScreen()
         dpr = screen.devicePixelRatio() if screen else 1.0
 
-        asset = Path(__file__).parent / 'assets' / f'{name}.svg'
-        renderer = QSvgRenderer(str(asset))
-        phys_size = int(round(18 * dpr))
-        pix = QPixmap(phys_size, phys_size)
-        pix.fill(Qt.transparent)
-        p = QPainter(pix)
-        renderer.render(p)
-        p.end()
-        pix.setDevicePixelRatio(dpr)
-        self._icon = pix
-
-        text_width = QFontMetrics(self.label_font).horizontalAdvance(name)
+        self._icon = svg_mode_pixmap(name, 18, dpr)
+        self.label_text = translate(name)
+        text_width = QFontMetrics(self.label_font).horizontalAdvance(self.label_text)
         self.setFixedWidth(max(160, min(220, 24+18+9+text_width)))
         if screen:
             x,y = toast_position(screen.availableGeometry(), self.width(), self.height(), screen.devicePixelRatio())
@@ -100,15 +91,15 @@ class ModeToast(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
         painter.setOpacity(self._opacity)
-        painter.setBrush(QColor('#E6181A20'))
-        painter.setPen(QPen(QColor(MODE_COLORS[self.mode_name]), 1))
-        painter.drawRoundedRect(QRectF(.5,.5,self.width()-1,self.height()-1),20,20)
+        painter.setBrush(QColor(color('ToastSurfaceColor', '#0A0A0A')))
+        painter.setPen(Qt.NoPen)
+        painter.drawRoundedRect(QRectF(0, 0, self.width(), self.height()), 20, 20)
         painter.setFont(self.label_font)
-        painter.setPen(QColor('#F5F7FA'))
-        text_width = QFontMetrics(self.label_font).horizontalAdvance(self.mode_name)
+        painter.setPen(QColor(color('TextPrimaryColor', '#F0F0F0')))
+        text_width = QFontMetrics(self.label_font).horizontalAdvance(self.label_text)
         x = (self.width()-18-9-text_width)/2
         painter.drawPixmap(round(x),11,18,18,self._icon)
-        painter.drawText(QRectF(x+27,0,text_width+1,40),Qt.AlignVCenter|Qt.AlignLeft,self.mode_name)
+        painter.drawText(QRectF(x+27,0,text_width+1,40),Qt.AlignVCenter|Qt.AlignLeft,self.label_text)
 
     def closeEvent(self, event):
         self.hide_timer.stop();self.animation.stop()

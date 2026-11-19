@@ -6,7 +6,7 @@ LOGO_OPTIONS = [('Custom', 'Custom'), ('Predator Cyan', 'Predator'), ('Hellfire 
 
 from PySide6.QtCore import Qt,QTimer
 from PySide6.QtGui import QColor,QPainter,QPen
-from PySide6.QtWidgets import QWidget,QVBoxLayout,QHBoxLayout,QLabel,QComboBox,QSlider,QLineEdit,QScrollArea
+from PySide6.QtWidgets import QWidget,QVBoxLayout,QHBoxLayout,QLabel,QComboBox,QSlider,QLineEdit,QButtonGroup
 from dialog_base import AudioDialog,AudioSwitch,button,row
 from controls import ColorWheel
 from hardware import EFFECTS
@@ -29,11 +29,109 @@ def color_editor():
     panel=QWidget();layout=QHBoxLayout(panel);layout.setContentsMargins(0,10,0,0);layout.setSpacing(8)
     layout.addStretch();label=QLabel('Color:');label.setStyleSheet('font-weight:600;');layout.addWidget(label)
     swatch=ColorSwatch();layout.addWidget(swatch)
-    field=QLineEdit();field.setFixedSize(80,26);field.setAlignment(Qt.AlignCenter)
+    field=QLineEdit();field.setFixedSize(80,26);field.setAlignment(Qt.AlignCenter);field.setMaxLength(7)
     field.setStyleSheet('font-family:Consolas,monospace;font-size:12px;font-weight:600;')
     layout.addWidget(field);layout.addStretch()
     return panel,field,swatch
 
+
+
+def build_lighting_settings_window(window, parent=None):
+    """Edit the shared operating-mode palette and brightness independently."""
+    from slider_snap import configure_snap
+
+    dialog = AudioDialog(parent or window, 'Lighting Settings', 500)
+    settings = window.settings
+    brightness = QSlider(Qt.Horizontal)
+    brightness.setRange(0, 100)
+    configure_snap(brightness, 1, 5)
+    level = QLabel()
+    row(dialog.body, 'Brightness', level)
+    dialog.body.addWidget(brightness)
+
+    tabs = QHBoxLayout()
+    group = QButtonGroup(dialog)
+    dialog.body.addLayout(tabs)
+    buttons = {}
+    for profile, title, _ in SLOTS:
+        choice = button(title)
+        choice.setCheckable(True)
+        tabs.addWidget(choice)
+        group.addButton(choice, profile)
+        buttons[profile] = choice
+
+    wheel = ColorWheel()
+    wheel.setFixedSize(140, 140)
+    dialog.body.addWidget(wheel, 0, Qt.AlignHCenter)
+    panel, field, swatch = color_editor()
+    dialog.body.addWidget(panel)
+    selected = 1
+    apply_timer = QTimer(dialog)
+    apply_timer.setSingleShot(True)
+    apply_timer.setInterval(150)
+    apply_timer.timeout.connect(lambda: window.apply('mode_lighting_palette', None))
+
+    def paint():
+        overrides = settings.value('mode_lighting_colors', {})
+        for profile, choice in buttons.items():
+            color = color_for(profile, overrides)
+            foreground = '#111111' if QColor(color).lightness() > 130 else '#ffffff'
+            border = '2px solid #00e5ff' if profile == selected else '1px solid #373737'
+            choice.setStyleSheet(f'background:{color};color:{foreground};border:{border};border-radius:3px;')
+        color = color_for(selected, overrides)
+        wheel.color = QColor(color)
+        swatch.color = QColor(color)
+        field.setText(color)
+        wheel.update()
+        swatch.update()
+
+    def select(profile):
+        nonlocal selected
+        selected = profile
+        buttons[profile].setChecked(True)
+        paint()
+
+    def change_color(color):
+        overrides = dict(settings.value('mode_lighting_colors', {}) or {})
+        if color.name().upper() == color_for(selected, overrides):
+            return
+        overrides[f'{selected:02X}'] = color.name()
+        settings.setValue('mode_lighting_colors', only_custom_overrides(overrides))
+        paint()
+        if selected == getattr(window, '_confirmed_profile', 1):
+            apply_timer.start()
+
+    def commit_hex():
+        value = field.text()
+        if len(value) == 7 and value.startswith('#') and QColor(value).isValid():
+            change_color(QColor(value))
+        paint()
+
+    def change_brightness(value):
+        level.setText(f'{value}%')
+        settings.setValue('mode_lighting_brightness', value)
+        apply_timer.start()
+
+    def reflect_brightness(value):
+        brightness.blockSignals(True)
+        brightness.setValue(value)
+        brightness.blockSignals(False)
+        level.setText(f'{brightness.value()}%')
+
+    def refresh():
+        reflect_brightness(settings.value('mode_lighting_brightness', 100, type=int))
+        active = getattr(window, '_confirmed_profile', None)
+        select(active if active in buttons else 1)
+
+    group.idClicked.connect(select)
+    wheel.changed.connect(change_color)
+    field.editingFinished.connect(commit_hex)
+    brightness.valueChanged.connect(change_brightness)
+    dialog.refresh = refresh
+    dialog.reflect_brightness = reflect_brightness
+    refresh()
+    dialog.adjustSize()
+    return dialog
 
 
 def build_lighting_window(window):
@@ -67,10 +165,13 @@ def build_lighting_window(window):
     apply_timer=QTimer(dialog);apply_timer.setSingleShot(True);apply_timer.setInterval(80)
     def commit_live():
         if loading[0]:return
-        if window.lighting_target=='Logo' and sync_logo.isChecked() and power.isChecked():
+        if window.lighting_target=='Logo' and sync_logo.isChecked():
             state=target_states['Keyboard']
-            window.apply('lighting',dict(colors=[(c.red(),c.green(),c.blue()) for c in state['colors']],
-                brightness=state['brightness'],effect=state['effect'],speed=state['speed'],sync_logo=True))
+            payload = dict(colors=[(c.red(),c.green(),c.blue()) for c in state['colors']],
+                           brightness=state['brightness'],effect=state['effect'],speed=state['speed'],sync_logo=True)
+            if state['effect'] == 'Wave':
+                payload['direction'] = window.settings.value('lighting_direction', 1, type=int)
+            window.apply('lighting', payload)
         else:
             window.apply_lighting()
     apply_timer.timeout.connect(commit_live)
@@ -85,26 +186,33 @@ def build_lighting_window(window):
         try:window.brightness.setValue(value)
         finally:loading[0]=False
 
-    brightness_label=QLabel();row(layout,'Brightness',brightness_label)
-    layout.addWidget(window.brightness)
+    tabs=QHBoxLayout();keyboard=button('Keyboard');logo=button('Logo');mode_key=button('Mode Key')
+    for item in (keyboard,logo,mode_key):item.setCheckable(True);tabs.addWidget(item)
+    layout.addLayout(tabs)
+    brightness_panel = QWidget()
+    brightness_layout = QVBoxLayout(brightness_panel)
+    brightness_layout.setContentsMargins(0,0,0,0)
+    brightness_label=QLabel();row(brightness_layout,'Brightness',brightness_label)
+    brightness_layout.addWidget(window.brightness)
     window.brightness.valueChanged.connect(lambda v:brightness_label.setText(f'{v}%'))
     brightness_label.setText(f'{window.brightness.value()}%')
     timeout=window.original_timeout;timeout.setParent(content)
     timeout.setRange(0, 120);timeout.setSingleStep(10);timeout.setPageStep(30)
-    timeout_label=QLabel('OFF' if not timeout.value() else f'{timeout.value()} s');row(layout,'Backlight Timeout',timeout_label)
-    layout.addWidget(timeout);timeout.valueChanged.connect(lambda v:timeout_label.setText('OFF' if not v else f'{v} s'))
+    timeout_panel = QWidget()
+    timeout_layout = QVBoxLayout(timeout_panel)
+    timeout_layout.setContentsMargins(0,0,0,0)
+    timeout_label=QLabel('OFF' if not timeout.value() else f'{timeout.value()} s');row(timeout_layout,'Backlight Timeout',timeout_label)
+    timeout_layout.addWidget(timeout);timeout.valueChanged.connect(lambda v:timeout_label.setText('OFF' if not v else f'{v} s'))
+    layout.addWidget(timeout_panel)
     with warnings.catch_warnings():
         warnings.simplefilter('ignore',RuntimeWarning)
         try:timeout.sliderReleased.disconnect()
         except RuntimeError:pass
     timeout.sliderReleased.connect(lambda:window.apply('led_timeout', timeout.value()))
-    tabs=QHBoxLayout();keyboard=button('Keyboard');logo=button('Logo');mode_key=button('Mode Key')
-    for item in (keyboard,logo,mode_key):item.setCheckable(True);tabs.addWidget(item)
-    layout.addLayout(tabs)
     keyboard_panel=QWidget();kb=QVBoxLayout(keyboard_panel);kb.setContentsMargins(0,0,0,0);kb.setSpacing(8)
-    mode=QComboBox();mode.addItems(['Static','Dynamic','Software']);mode.setFixedWidth(154);row(kb,'Lighting Mode',mode)
+    mode=QComboBox();mode.addItems(['Mode','Static','Dynamic','Software']);mode.setFixedWidth(210);row(kb,'Lighting Mode',mode)
     sync_panel=QWidget();sync_layout=QVBoxLayout(sync_panel);sync_layout.setContentsMargins(0,0,0,0)
-    sync=AudioSwitch();sync.setChecked(True);sync_label=row(sync_layout,'Sync All Zones',sync);kb.addWidget(sync_panel)
+    sync=AudioSwitch();sync.setChecked(window.settings.value('sync_zones', False, type=bool));sync_label=row(sync_layout,'Sync All Zones',sync);kb.addWidget(sync_panel)
     preset=QComboBox()
     for text,key in ZONE_OPTIONS:preset.addItem(text,key)
     preset_panel=QWidget();pl=QVBoxLayout(preset_panel);pl.setContentsMargins(0,0,0,0);row(pl,'Preset Themes',preset)
@@ -121,19 +229,31 @@ def build_lighting_window(window):
     wheel=ColorWheel();wheel.setFixedSize(140,140);kb.addWidget(wheel,0,Qt.AlignHCenter)
     hexrow,hexedit,hex_swatch=color_editor();kb.addWidget(hexrow)
     effect_combo=QComboBox();effect_row=QWidget();el=QVBoxLayout(effect_row);el.setContentsMargins(0,0,0,0)
-    effect_combo.setFixedWidth(210);effect_label=row(el,'Dynamic Effect',effect_combo);el.itemAt(0).layout().setContentsMargins(0,0,0,4);kb.addWidget(effect_row)
+    effect_combo.setFixedWidth(210);row(el,'Effect',effect_combo);el.itemAt(0).layout().setContentsMargins(0,0,0,4);kb.addWidget(effect_row)
+    direction_panel = QWidget()
+    direction_layout = QVBoxLayout(direction_panel)
+    direction_layout.setContentsMargins(0, 0, 0, 0)
+    direction = QComboBox()
+    direction.addItems(['Left', 'Right', 'Up', 'Down'])
+    direction.setFixedWidth(210)
+    direction.setCurrentIndex(window.settings.value('lighting_direction', 1, type=int))
+    row(direction_layout, 'Direction', direction)
+    kb.addWidget(direction_panel)
+    def change_direction(index):
+        window.settings.setValue('lighting_direction', index)
+        request_apply()
+    direction.currentIndexChanged.connect(change_direction)
     speed=QSlider(Qt.Horizontal);speed.setRange(0,100);speed.setSingleStep(25);speed.setPageStep(25)
     speed_label=QLabel();speed_panel=QWidget();sl=QVBoxLayout(speed_panel);sl.setContentsMargins(0,0,0,0)
-    row(sl,'Effect Speed',speed_label);sl.addWidget(speed);kb.addWidget(speed_panel)
+    row(sl,'Animation Speed',speed_label);sl.addWidget(speed);kb.addWidget(speed_panel)
     layout.addWidget(keyboard_panel)
     logo_panel=QWidget();ll=QVBoxLayout(logo_panel);ll.setContentsMargins(0,0,0,0);ll.setSpacing(8)
-    power=AudioSwitch();row(ll,'Logo Backlight',power)
     old_sync_logo=window.sync_logo_checkbox;old_sync_logo.hide()
     sync_logo=AudioSwitch();sync_logo.setChecked(old_sync_logo.isChecked())
     sync_logo.toggled.connect(old_sync_logo.setChecked);window.sync_logo_checkbox=sync_logo
     row(ll,'Sync With Keyboard',sync_logo)
     logo_effect_panel=QWidget();lep=QVBoxLayout(logo_effect_panel);lep.setContentsMargins(0,0,0,0);ll.addWidget(logo_effect_panel)
-    logo_mode=QComboBox();logo_mode.addItems(['Static','Breathing','Neon']);logo_mode.setFixedWidth(154);row(lep,'Effect Mode',logo_mode)
+    logo_mode=QComboBox();logo_mode.addItems(['Mode','Static','Breathing','Neon']);logo_mode.setFixedWidth(210);row(lep,'Lighting Mode',logo_mode)
     logo_color_panel=QWidget();lcp=QVBoxLayout(logo_color_panel);lcp.setContentsMargins(0,0,0,0);lcp.setSpacing(8);ll.addWidget(logo_color_panel)
     logo_preset=QComboBox()
     for text,key in LOGO_OPTIONS:logo_preset.addItem(text,key)
@@ -145,7 +265,7 @@ def build_lighting_window(window):
     row(lsp,'Animation Speed',logo_speed_label);lsp.addWidget(logo_speed)
     layout.addWidget(logo_panel)
     mode_key_panel=QWidget();mk=QVBoxLayout(mode_key_panel);mk.setContentsMargins(0,0,0,0);mk.setSpacing(8)
-    sync_mode_key=AudioSwitch();sync_mode_key.setChecked(window.settings.value('mode_key_sync',True,type=bool))
+    sync_mode_key=AudioSwitch();sync_mode_key.setChecked(window.settings.value('mode_key_sync',False,type=bool))
     setattr(window,'sync_mode_key',sync_mode_key.isChecked())
     row(mk,'Sync With Keyboard',sync_mode_key)
     mode_key_effect_panel=QWidget();mkep=QVBoxLayout(mode_key_effect_panel);mkep.setContentsMargins(0,0,0,0)
@@ -232,7 +352,6 @@ def build_lighting_window(window):
         col = QColor(color_for(s_mode, overrides))
         window.colors = [QColor(col) for _ in range(4)]
         paint()
-        request_apply()
 
     for s_mode, s_btn in mode_slot_buttons.items():
         s_btn.clicked.connect(lambda checked=False, m=s_mode: select_mode_slot(m))
@@ -254,19 +373,27 @@ def build_lighting_window(window):
     mode_key_speed.valueChanged.connect(lambda v: (mode_key_speed_label.setText(f'{v}%'), (window.speed.setValue(round(v/10)), request_apply()) if not loading[0] else None))
 
     def visibility():
-        static=mode.currentText()=='Static';is_keyboard=window.lighting_target=='Keyboard'
+        keyboard_mode=mode.currentText()
+        static=keyboard_mode=='Static';is_keyboard=window.lighting_target=='Keyboard'
+        animated=keyboard_mode in ('Dynamic','Software')
+        timeout_panel.setVisible(is_keyboard)
         sync_panel.setVisible(static);sync.setVisible(static);sync_label.setVisible(static);preset_panel.setVisible(static and not sync.isChecked());zones.setVisible(static and not sync.isChecked())
-        wheel.setVisible(static);hexrow.setVisible(static);effect_row.setVisible(not static);speed_panel.setVisible(not static)
-        independent=power.isChecked() and not sync_logo.isChecked()
+        wheel.setVisible(static);hexrow.setVisible(static);effect_row.setVisible(animated);speed_panel.setVisible(animated)
+        direction_panel.setVisible(keyboard_mode == 'Dynamic' and effect_combo.currentData() == 'Wave')
+        independent=not sync_logo.isChecked()
         is_mode_key = window.lighting_target == 'ModeKey'
         mode_key_independent = not sync_mode_key.isChecked()
         window.brightness.setEnabled(is_keyboard or (window.lighting_target=='Logo' and independent) or (is_mode_key and mode_key_independent))
-        sync_logo.setEnabled(power.isChecked())
+        brightness_panel.setVisible(
+            (is_keyboard and keyboard_mode != 'Mode') or
+            (window.lighting_target == 'Logo' and independent and logo_mode.currentText() != 'Mode') or
+            (is_mode_key and mode_key_independent)
+        )
         for item in (logo_mode,logo_preset,logo_wheel,logo_hex):item.setEnabled(independent)
         logo_speed.setEnabled(independent and logo_mode.currentText()!='Static')
         logo_effect_panel.setVisible(not sync_logo.isChecked())
         logo_color_panel.setVisible(not sync_logo.isChecked() and logo_mode.currentText()=='Static')
-        logo_speed_panel.setVisible(not sync_logo.isChecked() and logo_mode.currentText()!='Static')
+        logo_speed_panel.setVisible(not sync_logo.isChecked() and logo_mode.currentText() in ('Breathing', 'Neon'))
         # Mode key visibility
         mode_key_effect_panel.setVisible(mode_key_independent)
         mk_m = mode_key_mode.currentText()
@@ -281,15 +408,22 @@ def build_lighting_window(window):
             effect_combo.addItem(text,value)
             if value is None:effect_combo.model().item(effect_combo.count()-1).setEnabled(False)
         index=effect_combo.findData(desired) if desired is not None else 0;effect_combo.setCurrentIndex(max(0,index));effect_combo.blockSignals(False)
-        effect_label.setText('Software Effect' if mode.currentText()=='Software' else 'Dynamic Effect')
         if not loading[0]:
-            api_effect('Static' if mode.currentText()=='Static' else effect_combo.currentData())
+            current = mode.currentText()
+            api_effect(current if current in ('Mode', 'Static') else effect_combo.currentData())
             request_apply()
         visibility()
     mode.currentIndexChanged.connect(choose_mode)
-    effect_combo.currentIndexChanged.connect(lambda _: (api_effect(effect_combo.currentData()), request_apply()) if not loading[0] and effect_combo.currentData() else None)
+    def select_effect():
+        if not loading[0] and effect_combo.currentData():
+            api_effect(effect_combo.currentData())
+            request_apply()
+        visibility()
+    effect_combo.currentIndexChanged.connect(select_effect)
     def sync_zones(enabled):
         visibility()
+        if not loading[0]:
+            window.settings.setValue('sync_zones', enabled)
         if not loading[0] and enabled:
             window.colors=[QColor(window.colors[selected[0]]) for _ in range(4)]
             paint()
@@ -313,11 +447,10 @@ def build_lighting_window(window):
     preset.currentIndexChanged.connect(lambda _:apply_preset(preset));logo_preset.currentIndexChanged.connect(lambda _:apply_preset(logo_preset,True))
     def logo_effect():
         if not loading[0]:
-            if not power.isChecked():sync_logo.setChecked(False)
-            api_effect(logo_mode.currentText() if power.isChecked() else 'Off')
+            api_effect(logo_mode.currentText())
             request_apply()
         visibility()
-    power.toggled.connect(logo_effect);logo_mode.currentIndexChanged.connect(logo_effect)
+    logo_mode.currentIndexChanged.connect(logo_effect)
     def sync_cover(enabled):
         visibility();request_apply()
     sync_logo.toggled.connect(sync_cover)
@@ -332,13 +465,24 @@ def build_lighting_window(window):
             api_effect(state['effect']);selected[0]=0
             keyboard.setChecked(name=='Keyboard');logo.setChecked(name=='Logo');mode_key.setChecked(name=='ModeKey')
             keyboard_panel.setVisible(name=='Keyboard');logo_panel.setVisible(name=='Logo');mode_key_panel.setVisible(name=='ModeKey')
+            if name == 'Keyboard':
+                kb.insertWidget(1, brightness_panel)
+            elif name == 'Logo':
+                ll.insertWidget(2, brightness_panel)
+            else:
+                mk.insertWidget(2, brightness_panel)
             value=state['speed']*10;speed.setValue(value);logo_speed.setValue(value);mode_key_speed.setValue(value);set_speed(value)
             if name=='Keyboard':
-                mode.setCurrentText('Software' if state['effect'] in SOFTWARE_EFFECTS else 'Static' if state['effect']=='Static' else 'Dynamic');choose_mode(desired=state['effect'])
+                effect = state['effect']
+                mode.setCurrentText('Software' if effect in SOFTWARE_EFFECTS else effect if effect in ('Mode', 'Static') else 'Dynamic')
+                choose_mode(desired=effect)
             elif name=='Logo':
-                power.setChecked(state['effect']!='Off');logo_mode.setCurrentText(state['effect'] if state['effect']!='Off' else 'Static')
+                if state['effect'] == 'Off':
+                    window.brightness.setValue(0)
+                    api_effect('Static')
+                logo_mode.setCurrentText(window.effect.currentText())
             elif name=='ModeKey':
-                sync_mode_key.setChecked(window.settings.value('mode_key_sync', True, type=bool))
+                sync_mode_key.setChecked(window.settings.value('mode_key_sync', False, type=bool))
                 mode_key_mode.setCurrentText(state.get('effect', 'Mode'))
             paint();visibility()
         finally:loading[0]=False
@@ -348,10 +492,10 @@ def build_lighting_window(window):
         if window.lighting_target=='Keyboard' and mode.currentText()=='Software':
             for item,value in zip(window.color_buttons,colors):item.setStyleSheet(f'background:rgb{tuple(value)};min-height:32px;')
     window.worker.lighting_frame.connect(preview)
-    window.lighting_ui=dict(mode=mode,preset=preset,sync=sync,keyboard=keyboard,logo=logo,mode_key=mode_key,effect=effect_combo,speed=speed,logo_mode=logo_mode,logo_power=power,logo_preset=logo_preset,wheel=wheel,logo_wheel=logo_wheel,mode_key_wheel=mode_key_wheel,hex=hexedit,logo_hex=logo_hex,mode_key_hex=mode_key_hex,sync_logo=sync_logo,sync_mode_key=sync_mode_key,mode_key_mode=mode_key_mode,apply_timer=apply_timer,select_target=select_target,flush_pending=flush_pending,reflect_keyboard_brightness=reflect_keyboard_brightness)
+    window.lighting_ui=dict(mode=mode,preset=preset,sync=sync,keyboard=keyboard,logo=logo,mode_key=mode_key,effect=effect_combo,speed=speed,logo_mode=logo_mode,logo_preset=logo_preset,wheel=wheel,logo_wheel=logo_wheel,mode_key_wheel=mode_key_wheel,hex=hexedit,logo_hex=logo_hex,mode_key_hex=mode_key_hex,sync_logo=sync_logo,sync_mode_key=sync_mode_key,mode_key_mode=mode_key_mode,apply_timer=apply_timer,select_target=select_target,flush_pending=flush_pending,reflect_keyboard_brightness=reflect_keyboard_brightness)
     select_target(getattr(window,'lighting_target','Keyboard'),True)
     from slider_snap import configure_snap
-    configure_snap(window.brightness,25)
+    configure_snap(window.brightness,1,5)
     configure_snap(timeout,10,30)
     configure_snap(speed,25);configure_snap(logo_speed,25);configure_snap(mode_key_speed,25)
     fit_height()

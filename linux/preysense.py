@@ -20,16 +20,17 @@ from gpu_mode import GpuMode, requires_confirmation
 from system_power import SystemPower
 from calibration import Calibrator
 from source_profiles import SourceProfiles, detect_source
-from fan_curve import FanCurve, default_stages, compact_stages, normalize_stages
+from fan_curve import FanCurve, default_request_stages, compact_stages, normalize_stages
 from display import Display
 from cpu_power import CpuPower
+from cpu_tuning import observed_policy
 from power_ownership import PowerOwnership
 from factory_defaults import ObservedDefaults
 from mode_policies import fan_policy,power_policy,policies
 from hotkeys import Hotkeys,next_mode
 from lighting_animation import LightingAnimation
 from lighting_effects import SOFTWARE_EFFECTS
-from lighting_settings import startup_lighting
+from lighting_settings import mode_palette, startup_lighting, step_keyboard_brightness
 
 
 class Worker(QObject):
@@ -74,7 +75,6 @@ class Worker(QObject):
         self.overlay_demand = {"cpu": set(), "gpu": set(), "visible": False}
         self.main_window_visible = False
         self.fan_window_visible = False
-        self.gpu_clock_policies = {}
     def _capture_startup_defaults(self):
         if not self.observed_defaults:return
         profiles=self.calibrator.cache
@@ -144,10 +144,16 @@ class Worker(QObject):
                 except Exception: self.display_data = None
                 self.last_display_poll = time.monotonic()
             data['display'] = self.display_data
-            if self.cpu_dirty or initial:
+            refresh_cpu_power = self.cpu_dirty or initial
+            if refresh_cpu_power:
                 data['cpu_power']=self.cpu_power.snapshot()
                 data['observed_defaults']=self.observed_defaults.status() if self.observed_defaults else {}
                 self.cpu_dirty=False
+            if 'cpu_pl1_w' in cpu_req:
+                if not refresh_cpu_power:
+                    data['cpu_power'] = self.cpu_power.snapshot()
+                policy = observed_policy(data.get('cpu_power'))
+                data['cpu_pl1_w'] = policy['pl1'] if policy else None
             if self.source_dirty or initial:
                 self.source_data=detect_source(self.hardware.root)
                 self.ac_data=any(self.hardware.read(p/'online')=='1' for p in (self.hardware.root/'class/power_supply').glob('*'))
@@ -185,31 +191,27 @@ class Worker(QObject):
                     self.curve=None
                     self._last_sent_duty=None
                     if policy['kind']=='Custom':
-                        self.curve=FanCurve(stages=policy.get('stages'), delay=policy.get('delay', 2))
+                        self.curve=FanCurve(stages=policy.get('stages'), delay=policy.get('delay', 0), mode=int(current))
                     else: self.hardware.write('fan_mode',1 if policy['kind']=='Max' else 0)
                 power=self.power_policies.get(current)
                 if power:
                     limits = {k: v for k, v in power.items() if k != 'boost'}
-                    self.power_ownership.apply(**limits)
+                    if limits:
+                        self.power_ownership.apply(**limits)
+                    else:
+                        self.power_ownership.release()
                     boost_setting = power.get('boost', True)
                     self.cpu_power.set_boost(boost_setting)
                 else:
                     self.cpu_power.set_boost(True)
-                if hasattr(self, 'gpu_clock_policies') and self.gpu_clock_policies:
-                    clock_pol = self.gpu_clock_policies.get(current)
-                    if clock_pol and bool(self.config_store.data.get('Tuning', {}).get('EnableGpuOverclockingControl', False)):
-                        try:
-                            from gpu_clock_tuning import GpuClockTuning
-                            GpuClockTuning().apply_clock_offsets(clock_pol['core'], clock_pol['mem'])
-                        except Exception:
-                            pass
-                    else:
-                        try:
-                            from gpu_clock_tuning import GpuClockTuning
-                            GpuClockTuning().reset_clock_offsets()
-                        except Exception:
-                            pass
                 try:
+                    lighting = self.config_store.data.get('Lighting', {})
+                    keyboard = lighting.get('Keyboard', {})
+                    cover = lighting.get('Cover', {})
+                    if keyboard.get('EffectTag') == 'Mode' or (
+                        cover.get('EffectTag') == 'Mode' and not cover.get('SyncWithKeyboard')
+                    ):
+                        self.apply_mode_palette(profile=int(current))
                     mode_key_cfg = self.config_store.data.get('Lighting', {}).get('ModeKey', {})
                     if mode_key_cfg.get('Enabled', True):
                         sync = mode_key_cfg.get('SyncWithKeyboard', False)
@@ -231,9 +233,13 @@ class Worker(QObject):
                     gpu = float(data.get('gpu_temp') or 0)
                     if not 0 < cpu <= 125: raise RuntimeError('CPU temperature unavailable; custom fans stopped')
                     duty = self.curve.target(cpu_temp=cpu, gpu_temp=(gpu if 0 < gpu <= 125 else 0))
-                    if getattr(self, '_last_sent_duty', None) != duty:
+                    if duty == (0, 0):
+                        if getattr(self, '_last_sent_duty', None) != duty:
+                            self.hardware.write('fan_mode', 0)
+                    else:
+                        # Refresh the kernel bridge's watchdog lease even when the request is unchanged.
                         self.hardware.fan_duty(*duty)
-                        self._last_sent_duty = duty
+                    self._last_sent_duty = duty
                     data['custom_fans'] = list(duty)
                 except Exception as exc:
                     self.curve = None
@@ -265,7 +271,7 @@ class Worker(QObject):
     @Slot(str, object)
     def command(self, name, args):
         if getattr(getattr(self,'calibration_cycle',None),'active',False) is True:
-            if name in ('profile','cycle_mode','cpu_boost','cpu_power','power_policy','reset_power_policy','mode_policies','fan_policy','fan_mode','curve','calibrate','gpu_clock_offsets'):
+            if name in ('profile','cycle_mode','cpu_boost','cpu_power','power_policy','reset_power_policy','mode_policies','fan_policy','fan_mode','curve','calibrate'):
                 self.done.emit(name,'Wait for calibration to finish.');return
         self.state_dirty=True
         if name in ('profile','cycle_mode','power_policy','reset_power_policy','cpu_power','cpu_boost','mode_policies'):self.cpu_dirty=True
@@ -335,7 +341,6 @@ class Worker(QObject):
             elif name == 'mode_policies':
                 self.fan_policies=policies(args.get('fans',{}),fan_policy)
                 self.power_policies=policies(args.get('power',{}),power_policy)
-                self.gpu_clock_policies=args.get('gpu_clocks',{})
                 self.last_policy_mode=None
             elif name in ('fan_policy','power_policy'):
                 mode=str(args['mode'])
@@ -343,14 +348,6 @@ class Worker(QObject):
                 if name=='fan_policy': self.fan_policies[mode]=fan_policy(args['policy'])
                 else: self.power_policies[mode]=power_policy(args['policy'])
                 if self.hardware.bridge_read('profile')==mode:self.last_policy_mode=None
-            elif name == 'gpu_clock_offsets':
-                from gpu_clock_tuning import GpuClockTuning
-                ok, msg = GpuClockTuning().apply_clock_offsets(args.get('core', 0), args.get('mem', 0))
-                if not ok:
-                    self.done.emit('gpu_clock_offsets', msg)
-                    return
-                self.done.emit('gpu_clock_offsets', '')
-                return
             elif name == 'gpu_offsets':
                 from gpu_offsets import GpuOffsets
                 GpuOffsets().apply(args['mode'], args['ct'], args['db'], args.get('cp'))
@@ -389,14 +386,30 @@ class Worker(QObject):
                     self.animator.args['brightness']=args['brightness'];self.animator.wake_at=time.monotonic();self.animator.tick()
                 else:
                     values=dict(args);sync=values.pop('sync_logo',False)
-                    self.hardware.lighting(**values)
-                    if sync:self.hardware.logo_lighting(average_color(values['colors']),values['brightness'],'Static',values['speed'])
+                    if values['effect'] == 'Mode':
+                        self.apply_mode_palette()
+                    else:
+                        self.hardware.lighting(**values)
+                        if sync:
+                            cover_effect = values['effect'] if values['effect'] in ('Breathing', 'Neon') else 'Static'
+                            self.hardware.logo_lighting(average_color(values['colors']), values['brightness'], cover_effect, values['speed'])
             elif name=='logo_lighting':
                 if self.animator.active:self.animator.args['sync_logo']=False
-                self.hardware.logo_lighting(**args)
+                if args['effect'] == 'Mode':
+                    self.apply_mode_palette()
+                else:
+                    self.hardware.logo_lighting(**args)
+            elif name == 'mode_lighting_palette':
+                self.apply_mode_palette()
             elif name == 'mode_key_lighting':
                 values = dict(args)
                 values.pop('sync', None)
+                if values['effect'] == 'Mode':
+                    from mode_key_lighting import color_for, hex_to_rgb
+                    lighting = self.config_store.data['Lighting']
+                    overrides = lighting['ModeKey'].get('PowerModeColors') or lighting.get('PowerModeColors')
+                    profile = int(self.hardware.bridge_read('profile') or '1')
+                    values['color'] = hex_to_rgb(color_for(profile, overrides))
                 self.hardware.mode_key_lighting(**values)
             elif name == 'per_key_lighting':
                 values = dict(args)
@@ -411,8 +424,11 @@ class Worker(QObject):
                 else:
                     self.animator.stop()
                     values=dict(args);sync=values.pop('sync_logo',False)
-                    self.hardware.lighting(**values)
-                    if sync:self.hardware.logo_lighting(average_color(values['colors']),values['brightness'],'Static' if values['effect'] not in ('Breathing','Neon') else values['effect'],values['speed'])
+                    if values['effect'] == 'Mode':
+                        self.apply_mode_palette()
+                    else:
+                        self.hardware.lighting(**values)
+                        if sync:self.hardware.logo_lighting(average_color(values['colors']),values['brightness'],'Static' if values['effect'] not in ('Breathing','Neon') else values['effect'],values['speed'])
             else:
                 if name in ('profile','fan_mode'): self.curve = None; self._last_sent_duty = None
                 if name == 'profile':
@@ -423,6 +439,21 @@ class Worker(QObject):
         except Exception as exc:
             self.done.emit(name, str(exc))
         self.poll()
+
+    def apply_mode_palette(self, profile=None):
+        lighting = self.config_store.data['Lighting']
+        keyboard, cover = lighting['Keyboard'], lighting['Cover']
+        if profile is None:
+            active = self.hardware.bridge_read('profile')
+            profile = int(active) if active is not None and active != '' else 1
+        color, brightness = mode_palette(lighting, profile)
+        keyboard_follows = keyboard.get('EffectTag') == 'Mode'
+        cover_sync = cover.get('SyncWithKeyboard', False)
+        cover_follows = keyboard_follows if cover_sync else cover.get('EffectTag') == 'Mode'
+        if keyboard_follows:
+            self.hardware.lighting([color] * 4, brightness, 'Static')
+        if cover_follows:
+            self.hardware.logo_lighting(color, brightness, 'Static')
 
     def begin_calibration(self):
         """Automatic factory capture: ERM4-first (Windows path), else live mode settle."""
@@ -497,7 +528,7 @@ class Window(QMainWindow):
         self.resize(840, 650)
         icon = Path(__file__).resolve().parent / 'assets/appicon.svg'
         self.setWindowIcon(QIcon(str(icon)))
-        self.colors = [QColor(c) for c in self.settings.value('colors', ['#28d8ca']*4)]
+        self.colors = [QColor(c) for c in self.settings.value('colors', ['#00AEC7']*2 + ['#00E5FF']*2)]
         self._calibration_needed=not self.worker.calibration_enabled
         self.worker.moveToThread(self.thread)
         self.thread.started.connect(self.worker.start)
@@ -523,6 +554,7 @@ class Window(QMainWindow):
         self.hotkeys.predator.connect(self.toggle_window)
         self.hotkeys.mode.connect(self.request_profile)
         self.hotkeys.overlay.connect(lambda:self.overlay_toggle.setChecked(not self.overlay_toggle.isChecked()))
+        self.hotkeys.keyboard_brightness.connect(self.step_lighting_brightness)
         self.hotkeys.turbo.connect(self.request_next_profile)
         self.thread.start()
         try:
@@ -540,20 +572,17 @@ class Window(QMainWindow):
         self.overlay_toggle.toggled.connect(lambda enabled:self.settings.setValue('overlay_visible',enabled))
         QTimer.singleShot(150, lambda: self.command.emit('overlay_metrics', self.overlay.requested_metrics()))
         self.saved_gpu_policies={}
-        self.saved_gpu_clock_policies={}
         try:
             self.saved_fan_policies=policies(json.loads(self.settings.value('fan_policies','{}')),fan_policy)
             self.saved_power_policies=policies(json.loads(self.settings.value('power_policies','{}')),power_policy)
             loaded_gpu=json.loads(self.settings.value('gpu_policies','{}') or '{}')
             if isinstance(loaded_gpu, dict):
                 self.saved_gpu_policies=loaded_gpu
-            loaded_clocks=json.loads(self.settings.value('gpu_clock_policies','{}') or '{}')
-            if isinstance(loaded_clocks, dict):
-                self.saved_gpu_clock_policies=loaded_clocks
-            values=dict(fans=self.saved_fan_policies,power=self.saved_power_policies,gpu_clocks=self.saved_gpu_clock_policies)
-            if values['fans'] or values['power'] or values['gpu_clocks']:QTimer.singleShot(100,lambda:self.command.emit('mode_policies',values))
+            values = dict(fans=self.saved_fan_policies, power=self.saved_power_policies)
+            if any(values.values()):
+                QTimer.singleShot(100, lambda: self.command.emit('mode_policies', values))
         except (KeyError,TypeError,ValueError):
-            self.saved_fan_policies={};self.saved_power_policies={};self.saved_gpu_policies={};self.saved_gpu_clock_policies={}
+            self.saved_fan_policies={};self.saved_power_policies={};self.saved_gpu_policies={}
 
     def build(self):
         root = QWidget(); layout = QVBoxLayout(root)
@@ -590,9 +619,9 @@ class Window(QMainWindow):
         self.charge_apply = QPushButton('Apply limit'); self.charge_apply.clicked.connect(lambda: self.apply('battery_limit', int(self.charge.currentText()[:-1]))); charge.addWidget(self.charge_apply); charge.addStretch(); d.addLayout(charge)
         d.addStretch(); self.tabs.addTab(dashboard, 'Dashboard')
         curvepage = QWidget(); c = QVBoxLayout(curvepage)
-        self.fan_stages = default_stages(1)
+        self.fan_stages = default_request_stages(1)
         self.fan_channel_gpu = False
-        delayrow = QHBoxLayout(); delayrow.addWidget(QLabel('Fan control delay (seconds)')); self.curve_delay = QDoubleSpinBox(); self.curve_delay.setRange(0,5); self.curve_delay.setSingleStep(1); self.curve_delay.setValue(2); delayrow.addWidget(self.curve_delay); c.addLayout(delayrow)
+        delayrow = QHBoxLayout(); delayrow.addWidget(QLabel('Fan control delay (seconds)')); self.curve_delay = QDoubleSpinBox(); self.curve_delay.setRange(0,5); self.curve_delay.setSingleStep(1); self.curve_delay.setValue(0); delayrow.addWidget(self.curve_delay); c.addLayout(delayrow)
         try:
             saved_curve=json.loads(self.settings.value('fan_curve','null'))
             if saved_curve and saved_curve.get('stages'):
@@ -609,7 +638,7 @@ class Window(QMainWindow):
         for i in range(4):
             button = QPushButton(f'Zone {i+1}'); button.clicked.connect(lambda checked=False, i=i: self.choose_color(i)); row.addWidget(button); self.color_buttons.append(button)
         l.addLayout(row); self.paint_colors()
-        self.effect = QComboBox(); self.effect.addItems([*EFFECTS,*SOFTWARE_EFFECTS]); self.effect.setCurrentText(self.settings.value('effect', 'Static')); l.addWidget(self.effect)
+        self.effect = QComboBox(); self.effect.addItems([*EFFECTS,*SOFTWARE_EFFECTS,'Mode']); self.effect.setCurrentText(self.settings.value('effect', 'Mode')); l.addWidget(self.effect)
         l.addWidget(QLabel('Brightness')); self.brightness = QSlider(Qt.Horizontal); self.brightness.setRange(0,100); self.brightness.setValue(int(self.settings.value('brightness',100))); l.addWidget(self.brightness)
         l.addWidget(QLabel('Animation speed')); self.speed = QSlider(Qt.Horizontal); self.speed.setRange(0,10); self.speed.setValue(max(0,min(10,int(self.settings.value('speed',5))))); l.addWidget(self.speed)
         self.rgb_apply = QPushButton('Apply keyboard lighting'); self.rgb_apply.clicked.connect(self.apply_lighting); l.addWidget(self.rgb_apply)
@@ -729,11 +758,14 @@ class Window(QMainWindow):
     def report_error(self,message):
         self.status.setText(message);self.feedback.emit(message,True)
     def finished(self, name, error):
-        labels={'cpu_power':'CPU limits','power_policy':'CPU profile','gpu_offsets':'GPU offsets','gpu_clock_offsets':'GPU clock offsets','cpu_prochot':'PROCHOT','fan_policy':'Fan profile','fan_mode':'Fan mode','profile':'Performance mode','lighting':'Keyboard lighting','led_timeout':'Backlight timeout','usb_charging':'USB charging','battery_limit':'Battery limit','boot_sound':'Boot sound','display':'Refresh rate','auto_refresh':'Automatic refresh','mode_policies':'Saved mode policies'}
+        labels={'cpu_power':'CPU limits','power_policy':'CPU profile','gpu_offsets':'GPU offsets','cpu_prochot':'PROCHOT','fan_policy':'Fan profile','fan_mode':'Fan mode','profile':'Performance mode','lighting':'Keyboard lighting','led_timeout':'Backlight timeout','usb_charging':'USB charging','battery_limit':'Battery limit','boot_sound':'Boot sound','display':'Refresh rate','auto_refresh':'Automatic refresh','mode_policies':'Saved mode policies'}
         if name=='profile' and error:self.mode_switch.cancel();self._profile_preview=None
         label=labels.get(name,name.replace('_',' ').capitalize())
         text=(f'{label}: {error}' if error else name if name.startswith('GPU boot setting: ') else f'{label} applied successfully')
         self.status.setText(text);self.feedback.emit(text,bool(error))
+        if name in ('fan_policy', 'Custom fans') and hasattr(self, 'fan_error'):
+            self.fan_error.setText(text if error else '')
+            self.fan_error.setVisible(bool(error))
         if name=='gpu_mode' or name.startswith('GPU boot setting: '):
             restart = getattr(self,'_gpu_restart_pending',False)
             self._gpu_restart_pending = False
@@ -746,82 +778,35 @@ class Window(QMainWindow):
         for name,button in self.fan_kind_buttons.items():button.setChecked(name==kind)
         if hasattr(self,'fan_editor_state'):self.fan_editor_state(kind)
     def fan_editor_policy(self):
-        policy=dict(kind=self.fan_editor_kind)
-        if self.fan_editor_kind=='Custom':
-            policy.update(stages=compact_stages(self.fan_stages), delay=self.curve_delay.value())
-        return fan_policy(policy)
-    def apply_fan_policy(self,save=False,activate=None):
+        return fan_policy(dict(kind=self.fan_editor_kind,
+                               stages=compact_stages(self.fan_stages),
+                               delay=self.curve_delay.value()))
+    def apply_fan_policy(self,save=False,activate=None,drafts=None):
         try:policy=self.fan_editor_policy()
         except (ValueError,KeyError) as exc:self.report_error(str(exc));return
         mode=str(self.fan_profile.currentData())
         if save:
+            self.saved_fan_policies.update(drafts or {})
             self.saved_fan_policies[mode]=policy
             self.settings.setValue('fan_policies',json.dumps(self.saved_fan_policies))
+            for draft_mode, draft_policy in (drafts or {}).items():
+                if draft_mode != mode:
+                    self.apply('fan_policy', dict(mode=draft_mode, policy=draft_policy), immediate=True)
         self.apply('fan_policy',dict(mode=mode,policy=policy))
-    def load_fan_policy(self):
-        policy=getattr(self,'saved_fan_policies',{}).get(str(self.fan_profile.currentData()),dict(kind='Auto'))
+    def load_fan_policy(self, policy=None):
+        if policy is None:
+            policy=getattr(self,'saved_fan_policies',{}).get(str(self.fan_profile.currentData()),dict(kind='Auto'))
         self.set_fan_editor_kind(policy['kind'])
         try:mode=int(self.fan_profile.currentData())
         except (ValueError,TypeError):mode=1
-        if policy['kind']=='Custom' and policy.get('stages'):
+        if policy.get('stages'):
             self.fan_stages=normalize_stages(policy['stages'],mode)
-            self.curve_delay.setValue(int(policy.get('delay',2)))
+            self.curve_delay.setValue(int(policy.get('delay',0)))
         else:
-            self.fan_stages=default_stages(mode)
-            self.curve_delay.setValue(2)
+            self.fan_stages=default_request_stages(mode)
+            self.curve_delay.setValue(0)
         if hasattr(self,'refresh_fan_graph'):
             self.refresh_fan_graph()
-
-    def apply_boost_setting(self, enabled):
-        mode = str(self.power_profile.currentData())
-        if str(self.power_profile.currentData()) == str(self._confirmed_profile):
-            self.apply('cpu_boost', enabled)
-        if mode in getattr(self, 'saved_power_policies', {}):
-            self.saved_power_policies[mode]['boost'] = enabled
-            self.settings.setValue('power_policies', json.dumps(self.saved_power_policies))
-            self.apply('power_policy', dict(mode=mode, policy=self.saved_power_policies[mode]))
-
-    def refresh_prochot_ui(self):
-        from cpu_prochot import CpuProchot
-        snap = CpuProchot().read()
-        locked = bool(self.settings.value('factory_prochot_locked', False, type=bool)) if snap is None else snap.locked
-        if snap is None:
-            self.prochot_activation.setText('PROCHOT N/A')
-            self.tjmax_label.setText('Tj-Max —')
-            self.prochot_offset.setEnabled(False)
-            self.prochot_switch.setEnabled(False)
-            self.prochot_switch.blockSignals(True); self.prochot_switch.setChecked(False); self.prochot_switch.blockSignals(False)
-            return
-        if self.settings.value('factory_prochot_offset', None) is None:
-            self.settings.setValue('factory_prochot_offset', snap.offset_celsius)
-            self.settings.setValue('factory_prochot_locked', snap.locked)
-            self.settings.setValue('factory_tjmax', snap.tjmax_celsius)
-        offset = self.settings.value('prochot_offset', None)
-        try:
-            offset = int(offset) if offset is not None else snap.offset_celsius
-        except (TypeError, ValueError):
-            offset = snap.offset_celsius
-        self.prochot_offset.spin.blockSignals(True)
-        self.prochot_offset.setValue(offset)
-        self.prochot_offset.spin.blockSignals(False)
-        label = f'PROCHOT {snap.tjmax_celsius - offset}°C'
-        if locked:
-            label += ' - Locked'
-        self.prochot_activation.setText(label)
-        self.tjmax_label.setText(f'Tj-Max {snap.tjmax_celsius}°C')
-        tuning_on = bool(getattr(self, 'tuning_enabled_row', None) and self.tuning_enabled_row.isChecked())
-        can_toggle = (not locked) and tuning_on
-        self.prochot_switch.setEnabled(can_toggle)
-        want = False if locked else bool(self.settings.value('apply_prochot', False, type=bool))
-        self.prochot_switch.blockSignals(True); self.prochot_switch.setChecked(want); self.prochot_switch.blockSignals(False)
-        def on_prochot_toggle(on):
-            self.prochot_offset.setEnabled(bool(on) and can_toggle)
-            if on and self.settings.value('prochot_offset', None) is None:
-                self.settings.setValue('prochot_offset', self.prochot_offset.value())
-        try: self.prochot_switch.toggled.disconnect()
-        except TypeError: pass
-        self.prochot_switch.toggled.connect(on_prochot_toggle)
-        on_prochot_toggle(self.prochot_switch.isChecked())
 
     def set_tuning_status(self, text, is_error=False):
         status_label = getattr(self, 'tuning_status', None)
@@ -844,46 +829,40 @@ class Window(QMainWindow):
             self.feedback.emit(text, is_error)
 
     def apply_power_policy(self,save=False):
-        if hasattr(self,'tuning_enabled_row') and not self.tuning_enabled_row.isChecked():
-            self.set_tuning_status('Turn on Hardware Tuning first.', is_error=True); return
-        apply_cpu=getattr(self,'apply_cpu_switch',None) is None or self.apply_cpu_switch.isChecked()
-        apply_gpu=(getattr(self,'apply_gpu_switch',None) is not None and
-                   self.apply_gpu_switch.isChecked() and
-                   bool(getattr(self,'gpu_offsets_available',False) is True) and
-                   'Mock' not in type(getattr(self,'gpu_ct',None)).__name__)
-        apply_gpu_oc=(getattr(self,'apply_gpu_oc_switch',None) is not None and
-                      self.apply_gpu_oc_switch.isChecked() is True and
-                      'Mock' not in type(getattr(self,'gpu_core_offset',None)).__name__)
-        apply_prochot=(getattr(self,'prochot_switch',None) is not None and
-                       self.prochot_switch.isChecked() and
-                       hasattr(self,'prochot_offset') and
-                       'Mock' not in type(self.prochot_offset).__name__)
-        mode=str(self.power_profile.currentData())
-        if apply_prochot:
-            try:
-                offset=int(self.prochot_offset.value())
-            except (TypeError, ValueError):
-                self.set_tuning_status('Enter a PROCHOT offset, or turn its switch off.', is_error=True); return
-            if save:
-                self.settings.setValue('prochot_offset', offset)
-                self.settings.setValue('apply_prochot', True)
-            self.apply('cpu_prochot', offset)
-        elif save:
-            self.settings.setValue('apply_prochot', False)
+        cpu_limits_enabled = self.settings.value('enable_cpu_power_limits', True, type=bool) is not False
+        gpu_limits_enabled = self.settings.value('enable_gpu_power_limits', True, type=bool) is not False
+        cpu_switch = getattr(self, 'apply_cpu_switch', None)
+        gpu_switch = getattr(self, 'apply_gpu_switch', None)
+        boost_switch = getattr(self, 'cpu_boost', None)
+        apply_cpu = cpu_limits_enabled and (cpu_switch is None or (
+            cpu_switch.isChecked() is not False and cpu_switch.isEnabled() is not False))
+        apply_gpu = (gpu_limits_enabled and gpu_switch is not None and
+                     gpu_switch.isChecked() is True and self.gpu_offsets_available is True)
+        mode = str(self.power_profile.currentData())
+        fields = {}
         if apply_cpu:
-            boost_attr = getattr(self, 'cpu_boost', None)
+            fields.update(pl1=self.power_pl1.value(), pl2=self.power_pl2.value(), tau=self.power_tau.currentData())
+        if boost_switch is not None and boost_switch.isEnabled() is True and type(boost_switch.isChecked()) is bool:
+            fields['boost'] = boost_switch.isChecked()
+        offset = None
+        if str(self._confirmed_profile) == mode and self.settings.value('apply_prochot', False, type=bool) is True:
+            offset = self.settings.value('prochot_offset', None, type=int)
+        if not save and not fields and not apply_gpu and offset is None:
+            self.set_tuning_status('Turn on CPU boost, CPU limits, GPU limits, or PROCHOT first.', is_error=True)
+            return
+        if fields:
             try:
-                fields = dict(pl1=self.power_pl1.value(),pl2=self.power_pl2.value(),tau=self.power_tau.currentData())
-                if boost_attr is not None and hasattr(boost_attr, 'isChecked') and type(boost_attr.isChecked()) is bool:
-                    fields['boost'] = boost_attr.isChecked()
-                policy=power_policy(fields)
-            except ValueError as exc:self.set_tuning_status(str(exc), is_error=True);return
+                policy = power_policy(fields)
+            except ValueError as exc:
+                self.set_tuning_status(str(exc), is_error=True)
+                return
             if save:
-                self.saved_power_policies[mode]=policy
-                self.settings.setValue('power_policies',json.dumps(self.saved_power_policies))
-            self.apply('power_policy',dict(mode=mode,policy=policy))
+                self.saved_power_policies[mode] = policy
+            self.apply('power_policy', dict(mode=mode, policy=policy))
         elif save:
             self.saved_power_policies.pop(mode, None)
+            self.apply('reset_power_policy', int(mode))
+        if save:
             self.settings.setValue('power_policies', json.dumps(self.saved_power_policies))
         if apply_gpu and getattr(self, 'gpu_offsets_available', False) and hasattr(self, 'gpu_ct'):
             gpu = dict(mode=int(mode), ct=self.gpu_ct.value(), db=self.gpu_db.value(), cp=self.gpu_cp.value())
@@ -894,65 +873,30 @@ class Window(QMainWindow):
         elif save:
             self.saved_gpu_policies.pop(mode, None)
             self.settings.setValue('gpu_policies', json.dumps(self.saved_gpu_policies))
-        if apply_gpu_oc and getattr(self, 'gpu_clocks', None) and getattr(self.gpu_clocks, 'is_available', lambda: False)():
-            core = self.gpu_core_offset.value() if hasattr(self, 'gpu_core_offset') else 0
-            mem = self.gpu_mem_offset.value() if hasattr(self, 'gpu_mem_offset') else 0
-            if save:
-                self.saved_gpu_clock_policies[mode] = dict(core=core, mem=mem)
-                self.settings.setValue('gpu_clock_policies', json.dumps(self.saved_gpu_clock_policies))
-            self.apply('gpu_clock_offsets', dict(core=core, mem=mem))
-        elif save:
-            self.saved_gpu_clock_policies.pop(mode, None)
-            self.settings.setValue('gpu_clock_policies', json.dumps(self.saved_gpu_clock_policies))
-            if getattr(self, 'gpu_clocks', None):
-                self.apply('gpu_clock_offsets', dict(core=0, mem=0))
-        if not apply_cpu and not apply_gpu and not apply_gpu_oc and not apply_prochot:
-            self.set_tuning_status('Turn on CPU limits, GPU limits, GPU overclocking, or PROCHOT first.', is_error=True)
-            return
-
-        success_msg = 'Applied and saved.' if save else 'Applied and read back successfully.'
-        self.set_tuning_status(success_msg, is_error=False)
+        if offset is not None:
+            self.apply('cpu_prochot', offset)
+        self.set_tuning_status('Tuning request submitted.' if not save else 'Tuning settings saved.')
     def reset_power_policy(self):
         mode=str(self.power_profile.currentData())
         self.saved_power_policies.pop(mode,None);self.settings.setValue('power_policies',json.dumps(self.saved_power_policies))
         self.saved_gpu_policies.pop(mode, None)
         self.settings.setValue('gpu_policies', json.dumps(self.saved_gpu_policies))
-        self.saved_gpu_clock_policies.pop(mode, None)
-        self.settings.setValue('gpu_clock_policies', json.dumps(self.saved_gpu_clock_policies))
-        if hasattr(self, 'apply_gpu_oc_switch'):
-            self.apply_gpu_oc_switch.blockSignals(True); self.apply_gpu_oc_switch.setChecked(False); self.apply_gpu_oc_switch.blockSignals(False)
-        self.apply('gpu_clock_offsets', dict(core=0, mem=0))
-        factory=self.settings.value('factory_prochot_offset', None)
-        if factory is not None:
-            try:
-                self.prochot_offset.setValue(int(factory))
-                self.settings.setValue('prochot_offset', int(factory))
-            except (TypeError, ValueError):
-                pass
-        self.settings.setValue('apply_prochot', False)
-        if hasattr(self, 'prochot_switch'):
-            self.prochot_switch.blockSignals(True); self.prochot_switch.setChecked(False); self.prochot_switch.blockSignals(False)
         if hasattr(self, 'apply_cpu_switch'):
             self.apply_cpu_switch.blockSignals(True); self.apply_cpu_switch.setChecked(False); self.apply_cpu_switch.blockSignals(False)
         if hasattr(self, 'apply_gpu_switch'):
             self.apply_gpu_switch.blockSignals(True); self.apply_gpu_switch.setChecked(False); self.apply_gpu_switch.blockSignals(False)
-        if factory is not None and not bool(self.settings.value('factory_prochot_locked', False, type=bool)):
-            try: self.apply('cpu_prochot', int(factory))
-            except (TypeError, ValueError): pass
         self.apply('reset_power_policy',int(mode))
         self.load_power_policy()
-        if hasattr(self, 'refresh_prochot_ui'):
-            self.refresh_prochot_ui()
         self.set_tuning_status('Factory defaults restored.', is_error=False)
     def load_power_policy(self):
         mode=str(self.power_profile.currentData())
-        policy=getattr(self,'saved_power_policies',{}).get(mode)
+        saved_cpu = getattr(self, 'saved_power_policies', {}).get(mode, {})
+        policy = saved_cpu if 'pl1' in saved_cpu else None
         if hasattr(self, 'apply_cpu_switch'):
-            self.apply_cpu_switch.blockSignals(True)
             self.apply_cpu_switch.setChecked(policy is not None)
-            self.apply_cpu_switch.blockSignals(False)
+        if hasattr(self, 'cpu_boost'):
+            self.cpu_boost.setChecked(saved_cpu.get('boost', True))
         if not policy:
-            from cpu_tuning import observed_policy
             calibration=Calibrator()
             name=next((name for name,value in MODES.items() if value==self.power_profile.currentData()),None)
             cached_prof=calibration.cache.get(name)
@@ -963,12 +907,6 @@ class Window(QMainWindow):
         if policy:
             self.power_pl1.setValue(policy['pl1']);self.power_pl2.setValue(policy['pl2'])
             if 'tau' in policy:self.power_tau.setCurrentIndex(self.power_tau.findData(policy['tau']))
-            boost = policy.get('boost', True)
-            if hasattr(self, 'cpu_boost'):
-                self.cpu_boost.blockSignals(True); self.cpu_boost.setChecked(boost); self.cpu_boost.blockSignals(False)
-        else:
-            if hasattr(self, 'cpu_boost'):
-                self.cpu_boost.blockSignals(True); self.cpu_boost.setChecked(True); self.cpu_boost.blockSignals(False)
         if hasattr(self,'tau_slider'):
             self.tau_slider.slider.blockSignals(True);self.tau_slider.setValue(max(0,self.power_tau.currentIndex()));self.tau_slider.slider.blockSignals(False)
             self.tau_slider.label_value.setText(self.power_tau.currentText())
@@ -991,27 +929,10 @@ class Window(QMainWindow):
             self.gpu_cp.setValue(int(values.get('cp', 0)))
             if hasattr(self, 'refresh_gpu_nominal'):
                 self.refresh_gpu_nominal()
-        if hasattr(self, 'gpu_core_offset') and hasattr(self, 'gpu_mem_offset'):
-            saved_clock = getattr(self, 'saved_gpu_clock_policies', {}).get(mode)
-            clocks_avail = getattr(getattr(self, 'gpu_clocks', None), 'is_available', lambda: False)()
-            if hasattr(self, 'apply_gpu_oc_switch'):
-                self.apply_gpu_oc_switch.blockSignals(True)
-                self.apply_gpu_oc_switch.setChecked(bool(saved_clock) and clocks_avail)
-                self.apply_gpu_oc_switch.blockSignals(False)
-                if hasattr(self, 'gpu_oc_panel'):
-                    self.gpu_oc_panel.setEnabled(self.apply_gpu_oc_switch.isChecked() and clocks_avail)
-            default_core = 100 if mode == '5' else 0
-            default_mem = 200 if mode == '5' else 0
-            c_val = saved_clock.get('core', default_core) if saved_clock else default_core
-            m_val = saved_clock.get('mem', default_mem) if saved_clock else default_mem
-            self.gpu_core_offset.setValue(c_val)
-            self.gpu_mem_offset.setValue(m_val)
         if hasattr(self, 'apply_cpu_switch'):
             self.apply_cpu_switch.toggled.emit(self.apply_cpu_switch.isChecked())
         if hasattr(self, 'apply_gpu_switch'):
             self.apply_gpu_switch.toggled.emit(self.apply_gpu_switch.isChecked())
-        if hasattr(self, 'apply_gpu_oc_switch'):
-            self.apply_gpu_oc_switch.toggled.emit(self.apply_gpu_oc_switch.isChecked())
     def apply_curve(self):
         args = dict(stages=compact_stages(self.fan_stages), delay=self.curve_delay.value())
         try: FanCurve(stages=args['stages'], delay=args['delay'])
@@ -1026,6 +947,39 @@ class Window(QMainWindow):
         for button, color in zip(self.color_buttons,self.colors):
             foreground = '#111111' if color.lightness()>130 else '#ffffff'
             button.setStyleSheet(f'background:{color.name()};color:{foreground};min-height:64px;')
+    def step_lighting_brightness(self, steps):
+        ui = self.lighting_ui
+        ui['flush_pending']()
+        state = self.lighting_target_states['Keyboard']
+        if self.lighting_target == 'Keyboard':
+            state.update(colors=list(self.colors), brightness=self.brightness.value(),
+                         effect=self.effect.currentText(), speed=self.speed.value())
+        if state['effect'] == 'Mode':
+            current = self.settings.value('mode_lighting_brightness', 100, type=int)
+            brightness = step_keyboard_brightness(current, steps)
+            if brightness != current:
+                self.settings.setValue('mode_lighting_brightness', brightness)
+                settings_dialog = self.dialogs.get('LightingSettings')
+                if settings_dialog is not None:
+                    settings_dialog.reflect_brightness(brightness)
+                self.apply('mode_lighting_palette', None)
+            return
+        current = state['brightness']
+        brightness = step_keyboard_brightness(current, steps)
+        if brightness == current:
+            return
+        state['brightness'] = brightness
+        ui['reflect_keyboard_brightness'](brightness)
+        self.settings.setValue('brightness', brightness)
+        payload = dict(
+            colors=[(c.red(), c.green(), c.blue()) for c in state['colors']],
+            brightness=brightness, effect=state['effect'], speed=state['speed'],
+            sync_logo=self.sync_logo,
+        )
+        if state['effect'] == 'Wave':
+            payload['direction'] = self.settings.value('lighting_direction', 1, type=int)
+        self.apply('keyboard_brightness', payload)
+
     def apply_lighting(self):
         target = getattr(self, 'lighting_target', 'Keyboard')
         if target == 'Logo':
@@ -1050,7 +1004,8 @@ class Window(QMainWindow):
             self.settings.setValue('mode_key_sync', sync)
             if sync or effect == 'Mode':
                 from mode_key_lighting import color_for, hex_to_rgb
-                prof = int(getattr(self, '_confirmed_profile', 1) or 1)
+                confirmed = getattr(self, '_confirmed_profile', None)
+                prof = 1 if confirmed is None else confirmed
                 overrides = self.settings.value('mode_key_colors', {})
                 color_hex = color_for(prof, overrides)
                 r, g, b = hex_to_rgb(color_hex)
@@ -1062,7 +1017,12 @@ class Window(QMainWindow):
         self.settings.setValue('effect', self.effect.currentText())
         self.settings.setValue('brightness', self.brightness.value())
         self.settings.setValue('speed', self.speed.value())
-        self.apply('lighting', dict(colors=[(c.red(), c.green(), c.blue()) for c in self.colors], brightness=self.brightness.value(), effect=self.effect.currentText(), speed=self.speed.value(), sync_logo=getattr(self, 'sync_logo', False)))
+        payload = dict(colors=[(c.red(), c.green(), c.blue()) for c in self.colors],
+                       brightness=self.brightness.value(), effect=self.effect.currentText(),
+                       speed=self.speed.value(), sync_logo=getattr(self, 'sync_logo', False))
+        if payload['effect'] == 'Wave':
+            payload['direction'] = self.settings.value('lighting_direction', 1, type=int)
+        self.apply('lighting', payload)
     def update_data(self, data):
         try:confirmed=int(data.get('profile'))
         except (TypeError,ValueError):confirmed=None
@@ -1076,12 +1036,10 @@ class Window(QMainWindow):
             self._confirmed_profile=confirmed
         power=data.get('cpu_power',{})
         self._latest_cpu_power=power
-        self.power_apply.setEnabled(power.get('writable',False))
-        if hasattr(self,'cpu_boost'):
-            self.cpu_boost.setEnabled(power.get('boost_writable',False))
-            if str(self.power_profile.currentData()) == str(self._confirmed_profile):
-                self.cpu_boost.blockSignals(True);self.cpu_boost.setChecked(bool(power.get('boost', True)));self.cpu_boost.blockSignals(False)
-        if hasattr(self,'power_save'):self.power_save.setEnabled(power.get('writable',False))
+        if hasattr(self, 'cpu_boost'):
+            self.cpu_boost.setEnabled(power.get('boost_writable', False))
+        if hasattr(self, 'apply_cpu_switch'):
+            self.apply_cpu_switch.setEnabled(power.get('writable', False))
         if power.get('domains') and not self.power_initialized:
             self.power_initialized=True
             self.load_power_policy()

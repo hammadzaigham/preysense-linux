@@ -3,8 +3,16 @@ import os,time,select
 from pathlib import Path
 from PySide6.QtCore import QObject,Signal,QTimer,QSocketNotifier,Qt
 
+BRIGHTNESS_DOWN = frozenset((0x11, 0x1A, 0x44, 0x57, 0x78, 0x7A, 0x7D, 0x8B, 0xC5))
+BRIGHTNESS_UP = frozenset((0x12, 0x1B, 0x45, 0x58, 0x07, 0x79, 0x7C, 0x8C, 0xC4))
+
 def classify_report(report):
     if len(report)<2 or report[0]!=4:return None
+    if len(report) >= 3 and report[2] == 0xFF:
+        if report[1] in BRIGHTNESS_DOWN:
+            return 'brightness_down'
+        if report[1] in BRIGHTNESS_UP:
+            return 'brightness_up'
     if report[1]==0x85 or (len(report)>=3 and report[1]==5 and report[2]==1):return 'turbo'
     if len(report)>=3 and report[1]==0x75 and report[2]==0xff:return 'predator'
     return None
@@ -20,9 +28,12 @@ class Hotkeys(QObject):
     turbo=Signal()
     mode=Signal(int)
     overlay=Signal()
+    keyboard_brightness=Signal(int)
     def __init__(self,parent=None,root=Path('/sys')):
         super().__init__(parent);self.root=Path(root);self.fd=None;self.notifier=None;self.count=None;self.last={'predator':float('-inf'),'turbo':float('-inf')};self.shortcuts=None
         self.event_fds={};self.event_poll=None;self.event_notifier=None
+        self.brightness_steps=None
+        self.last_brightness = None
         self.fallback_baseline=None
         self.fallback_timer=QTimer(self);self.fallback_timer.setSingleShot(True);self.fallback_timer.timeout.connect(lambda:self.predator_fallback(self.fallback_baseline))
         self.timer=QTimer(self);self.timer.timeout.connect(self.poll);self.timer.setTimerType(Qt.PreciseTimer)
@@ -33,8 +44,13 @@ class Hotkeys(QObject):
         try:
             if (native/'event_notifications').read_text().strip()!='1':return False
             self.event_poll=select.epoll()
-            for name in ('predator_events','shortcut_events'):
-                fd=os.open(native/name,os.O_RDONLY|os.O_NONBLOCK|os.O_CLOEXEC)
+            for name in ('predator_events','shortcut_events','keyboard_brightness_steps'):
+                try:
+                    fd=os.open(native/name,os.O_RDONLY|os.O_NONBLOCK|os.O_CLOEXEC)
+                except FileNotFoundError:
+                    if name == 'keyboard_brightness_steps':
+                        continue
+                    raise
                 self.event_fds[name]=fd
                 os.read(fd,4096)  # Acknowledge the current sysfs generation.
                 self.event_poll.register(fd,select.EPOLLPRI|select.EPOLLERR)
@@ -67,6 +83,19 @@ class Hotkeys(QObject):
         self.last[kind]=now
         if kind=='turbo':self.turbo.emit();return
         self.predator.emit()
+    def dispatch_brightness(self, steps, source):
+        if not steps:
+            return
+        now = time.monotonic()
+        if self.last_brightness is not None and abs(steps) == 1:
+            last_time, last_steps, last_source = self.last_brightness
+            interval = .03 if source == last_source == 'hid' else .10
+            if steps == last_steps and now - last_time < interval and (
+                source != last_source or source == 'hid'
+            ):
+                return
+        self.last_brightness = (now, steps, source)
+        self.keyboard_brightness.emit(steps)
     def poll(self):
         try:
             count=int(self.counter('predator_events'))
@@ -81,6 +110,14 @@ class Hotkeys(QObject):
                 if overlay>self.shortcuts[1] and (overlay-self.shortcuts[1])%2:self.overlay.emit()
             self.shortcuts=(serial,overlay)
         except (OSError,ValueError):self.shortcuts=None
+        try:
+            steps = int(self.counter('keyboard_brightness_steps'))
+            if self.brightness_steps is not None and steps != self.brightness_steps:
+                delta = (steps - self.brightness_steps + 2**31) % 2**32 - 2**31
+                self.dispatch_brightness(delta, 'evdev')
+            self.brightness_steps = steps
+        except (OSError, ValueError):
+            self.brightness_steps = None
         if self.fd is None:
             for p in (self.root/'class/hidraw').glob('hidraw*'):
                 try:
@@ -110,6 +147,8 @@ class Hotkeys(QObject):
                 if not data:self.close();return
                 kind=classify_report(data)
                 if kind=='predator':self.predator_report()
+                elif kind=='brightness_down':self.dispatch_brightness(-1, 'hid')
+                elif kind=='brightness_up':self.dispatch_brightness(1, 'hid')
                 elif kind:self.dispatch(kind)
         except BlockingIOError:pass
         except OSError:self.close()

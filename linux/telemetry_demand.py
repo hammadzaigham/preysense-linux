@@ -11,6 +11,7 @@ CPU = {
     'Effective Clock': 'cpu_p_core_mhz',
     'Voltage': 'cpu_voltage_v',
     'Power': 'cpu_power_w',
+    'Power Limit': 'cpu_pl1_w',
     'Memory': 'memory_used_gb',
     'Memory Speed': 'memory_speed_mhz',
     'Fan Speed': 'cpu_fan',

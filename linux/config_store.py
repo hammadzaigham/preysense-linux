@@ -42,14 +42,14 @@ def _mode_tuning(name=None):
 
 
 def _mode_fans():
-    return {'ControlMode': 0, 'RampUpSeconds': 2, 'Stages': None}
+    return {'ControlMode': 0, 'RampUpSeconds': 0, 'Stages': None}
 
 
 def default_config():
     tuning = {
         'EnableCpuBoostTuningControl': True,
-        'EnableCpuPowerLimitControl': False,
-        'EnableGpuPowerLimitControl': False,
+        'EnableCpuPowerLimitControl': True,
+        'EnableGpuPowerLimitControl': True,
         'EnableGpuOverclockingControl': False,
         'ApplyProchotOffset': False,
         'ProchotOffsetCelsius': None,
@@ -97,29 +97,29 @@ def default_config():
                 'Brightness': 100,
                 'Speed': 5,
                 'BacklightTimeoutSeconds': 30,
-                'SelectedColorHex': '#28d8ca',
-                'SyncZones': True,
-                'Zone1ColorHex': '#28d8ca',
-                'Zone2ColorHex': '#28d8ca',
-                'Zone3ColorHex': '#28d8ca',
-                'Zone4ColorHex': '#28d8ca',
-                'EffectTag': 'Static',
-                'PresetTheme': 'Custom',
+                'SelectedColorHex': '#00AEC7',
+                'SyncZones': False,
+                'Zone1ColorHex': '#00AEC7',
+                'Zone2ColorHex': '#00AEC7',
+                'Zone3ColorHex': '#00E5FF',
+                'Zone4ColorHex': '#00E5FF',
+                'EffectTag': 'Mode',
+                'PresetTheme': 'Mode',
             },
             'Cover': {
                 'Enabled': True,
-                'ColorHex': '#28d8ca',
-                'Brightness': 80,
+                'ColorHex': '#00AEC7',
+                'Brightness': 100,
                 'Speed': 5,
                 'SyncWithKeyboard': False,
-                'EffectTag': 'Static',
+                'EffectTag': 'Mode',
             },
             'ModeKey': {
                 'Enabled': True,
                 'ColorHex': '#00AEC7',
                 'Brightness': 100,
                 'Speed': 5,
-                'SyncWithKeyboard': True,
+                'SyncWithKeyboard': False,
                 'EffectTag': 'Mode',
                 'PowerModeColors': {},
             },
@@ -128,7 +128,7 @@ def default_config():
             'Enabled': False,
             'Theme': 'Dark',
             'ScalePercent': 100,
-            'BackgroundOpacityPercent': 50,
+            'BackgroundOpacityPercent': 100,
             'TextOpacityPercent': 100,
             'PositionHorizontal': 'Left',
             'PositionVertical': 'Top',
@@ -265,10 +265,9 @@ class ConfigStore:
                         continue
                     slot = self.data['Fans'][name]
                     slot['ControlMode'] = {'Auto': 0, 'Max': 1, 'Custom': 2}[kind]
-                    if kind == 'Custom':
-                        slot['RampUpSeconds'] = int(policy.get('delay', 2) or 2)
-                        if policy.get('stages'):
-                            slot['Stages'] = policy['stages']
+                    if policy.get('stages'):
+                        slot['RampUpSeconds'] = int(policy.get('delay', 0) or 0)
+                        slot['Stages'] = policy['stages']
         except (TypeError, ValueError, json.JSONDecodeError):
             pass
         try:
@@ -295,6 +294,8 @@ class ConfigStore:
             lit['Brightness'] = int(val('brightness', 100))
         if has('speed'):
             lit['Speed'] = int(val('speed', 5))
+        if has('sync_zones'):
+            lit['SyncZones'] = bool(val('sync_zones', False))
         if has('effect'):
             lit['EffectTag'] = str(val('effect', 'Static'))
         if has('led_timeout'):
@@ -317,7 +318,7 @@ class ConfigStore:
             cover['Speed'] = int(val('logo_speed', 5))
         mode_key_cfg = self.data['Lighting'].setdefault('ModeKey', {
             'Enabled': True, 'ColorHex': '#00AEC7', 'Brightness': 100, 'Speed': 5,
-            'SyncWithKeyboard': True, 'EffectTag': 'Mode', 'PowerModeColors': {}
+            'SyncWithKeyboard': False, 'EffectTag': 'Mode', 'PowerModeColors': {}
         })
         if has('mode_key_sync'):
             mode_key_cfg['SyncWithKeyboard'] = bool(val('mode_key_sync', True))
@@ -474,9 +475,9 @@ class JsonSettings:
         if key == 'enable_cpu_boost_tuning':
             return bool(data['Tuning'].get('EnableCpuBoostTuningControl', True))
         if key == 'enable_cpu_power_limits':
-            return bool(data['Tuning'].get('EnableCpuPowerLimitControl', False))
+            return bool(data['Tuning'].get('EnableCpuPowerLimitControl', True))
         if key == 'enable_gpu_power_limits':
-            return bool(data['Tuning'].get('EnableGpuPowerLimitControl', False))
+            return bool(data['Tuning'].get('EnableGpuPowerLimitControl', True))
         if key == 'enable_gpu_overclocking':
             return bool(data['Tuning'].get('EnableGpuOverclockingControl', False))
         if key == 'gpu_clock_policies':
@@ -514,6 +515,8 @@ class JsonSettings:
             return len(ov.get('Slots') or [])
         if key == 'hud_scale':
             return int(ov.get('ScalePercent', 100))
+        if key == 'overlay_theme':
+            return 'White' if ov.get('Theme') == 'White' else 'Dark'
         if key == 'hud_background':
             return int(ov.get('BackgroundOpacityPercent', 50))
         if key == 'hud_text':
@@ -528,27 +531,36 @@ class JsonSettings:
             return f"{ov.get('PositionVertical', 'Top')} {ov.get('PositionHorizontal', 'Left').lower()}"
         if key == 'brightness':
             return int(lit.get('Brightness', 100))
+        if key == 'mode_lighting_brightness':
+            return int(data['Lighting'].get('ModeBrightness', 100))
+        if key == 'mode_lighting_colors':
+            return data['Lighting'].get('PowerModeColors', {})
         if key == 'speed':
             return int(lit.get('Speed', 5))
+        if key == 'sync_zones':
+            return bool(lit.get('SyncZones', False))
         if key == 'effect':
-            return lit.get('EffectTag', 'Static')
+            return lit.get('EffectTag', 'Mode')
+        if key == 'lighting_direction':
+            direction = lit.get('Direction')
+            return direction if direction in (0, 1, 2, 3) else 1
         if key == 'led_timeout':
             return int(lit.get('BacklightTimeoutSeconds', 30))
         if key == 'colors':
-            return [lit.get(f'Zone{i}ColorHex', '#28d8ca') for i in range(1, 5)]
+            return [lit.get(f'Zone{i}ColorHex', '#00AEC7' if i <= 2 else '#00E5FF') for i in range(1, 5)]
         if key == 'sync_logo':
             return bool(cover.get('SyncWithKeyboard'))
         if key == 'logo_color':
-            return cover.get('ColorHex', '#28d8ca')
+            return cover.get('ColorHex', '#00AEC7')
         if key == 'logo_brightness':
-            return int(cover.get('Brightness', 80))
+            return int(cover.get('Brightness', 100))
         if key == 'logo_effect':
-            return cover.get('EffectTag', 'Static')
+            return cover.get('EffectTag', 'Mode')
         if key == 'logo_speed':
             return int(cover.get('Speed', 5))
         mode_key_cfg = data['Lighting'].get('ModeKey', {})
         if key == 'mode_key_sync':
-            return bool(mode_key_cfg.get('SyncWithKeyboard', True))
+            return bool(mode_key_cfg.get('SyncWithKeyboard', False))
         if key == 'mode_key_color':
             return mode_key_cfg.get('ColorHex', '#00AEC7')
         if key == 'mode_key_brightness':
@@ -571,6 +583,16 @@ class JsonSettings:
     def _set(self, key, value, data):
         g, d, b, s = data['General'], data['Display'], data['Battery'], data['Session']
         lit, cover, ov = data['Lighting']['Keyboard'], data['Lighting']['Cover'], data['Overlay']
+        if key == 'mode_lighting_brightness':
+            data['Lighting']['ModeBrightness'] = max(0, min(100, int(value)))
+            return
+        if key == 'mode_lighting_colors':
+            from mode_key_lighting import only_custom_overrides
+            data['Lighting']['PowerModeColors'] = only_custom_overrides(value)
+            return
+        if key == 'lighting_direction':
+            lit['Direction'] = int(value)
+            return
         if key == 'theme':
             g['LightTheme'] = str(value).lower() == 'light'; return
         if key == 'language':
@@ -637,6 +659,9 @@ class JsonSettings:
             return
         if key == 'hud_scale':
             ov['ScalePercent'] = int(value); return
+        if key == 'overlay_theme':
+            ov['Theme'] = 'White' if value == 'White' else 'Dark'
+            return
         if key == 'hud_background':
             ov['BackgroundOpacityPercent'] = int(value); return
         if key == 'hud_text':
@@ -651,6 +676,8 @@ class JsonSettings:
             lit['Brightness'] = int(value); return
         if key == 'speed':
             lit['Speed'] = int(value); return
+        if key == 'sync_zones':
+            lit['SyncZones'] = bool(value); return
         if key == 'effect':
             lit['EffectTag'] = str(value); return
         if key == 'led_timeout':
@@ -675,7 +702,7 @@ class JsonSettings:
             cover['Speed'] = int(value); return
         mode_key_cfg = data['Lighting'].setdefault('ModeKey', {
             'Enabled': True, 'ColorHex': '#00AEC7', 'Brightness': 100, 'Speed': 5,
-            'SyncWithKeyboard': True, 'EffectTag': 'Mode', 'PowerModeColors': {}
+            'SyncWithKeyboard': False, 'EffectTag': 'Mode', 'PowerModeColors': {}
         })
         if key == 'mode_key_sync':
             mode_key_cfg['SyncWithKeyboard'] = bool(value); return
@@ -713,14 +740,15 @@ class JsonSettings:
             slot = self.store.data['Fans'][name]
             mode = int(slot.get('ControlMode', 0) or 0)
             kind = {0: 'Auto', 1: 'Max', 2: 'Custom'}.get(mode, 'Auto')
-            if kind != 'Custom':
-                out[str(code)] = {'kind': kind}
-            else:
+            if slot.get('Stages') or kind == 'Custom':
+                from fan_curve import compact_stages, default_request_stages
                 out[str(code)] = {
-                    'kind': 'Custom',
-                    'delay': int(slot.get('RampUpSeconds', 2) or 2),
-                    'stages': slot.get('Stages') or [],
+                    'kind': kind,
+                    'delay': int(slot.get('RampUpSeconds', 0) or 0),
+                    'stages': slot.get('Stages') or compact_stages(default_request_stages(code)),
                 }
+            else:
+                out[str(code)] = {'kind': kind}
         return out
 
     def _import_fan_policies(self, fans):
@@ -735,38 +763,39 @@ class JsonSettings:
                 continue
             slot = self.store.data['Fans'][name]
             slot['ControlMode'] = {'Auto': 0, 'Max': 1, 'Custom': 2}[kind]
-            if kind == 'Custom':
-                slot['RampUpSeconds'] = int(policy.get('delay', 2) or 2)
-                if policy.get('stages'):
-                    slot['Stages'] = policy['stages']
+            if policy.get('stages'):
+                slot['RampUpSeconds'] = int(policy.get('delay', 0) or 0)
+                slot['Stages'] = policy['stages']
 
     def _export_power_policies(self):
         out = {}
         for name, code in MODE_CODES.items():
             slot = self.store.data['Tuning'][name]
-            if not slot.get('ApplyCpuLimits'):
-                continue
-            if slot.get('CpuPl1Watts') is None or slot.get('CpuPl2Watts') is None:
-                continue
-            policy = {'pl1': int(slot['CpuPl1Watts']), 'pl2': int(slot['CpuPl2Watts'])}
-            if slot.get('CpuTurboTimeLimitSeconds') is not None:
-                policy['tau'] = int(slot['CpuTurboTimeLimitSeconds'])
-            if slot.get('CpuBoost') is not None:
+            policy = {}
+            if slot.get('ApplyCpuLimits') and slot.get('CpuPl1Watts') is not None and slot.get('CpuPl2Watts') is not None:
+                policy.update(pl1=int(slot['CpuPl1Watts']), pl2=int(slot['CpuPl2Watts']))
+                if slot.get('CpuTurboTimeLimitSeconds') is not None:
+                    policy['tau'] = int(slot['CpuTurboTimeLimitSeconds'])
+            if slot.get('CpuBoost') is not None and (slot.get('ApplyCpuBoost') or policy):
                 policy['boost'] = bool(slot['CpuBoost'])
-            out[str(code)] = policy
+            if policy:
+                out[str(code)] = policy
         return out
 
     def _import_power_policies(self, power):
         if not isinstance(power, dict):
             return
         for name in MODE_NAMES:
-            self.store.data['Tuning'][name]['ApplyCpuLimits'] = False
+            slot = self.store.data['Tuning'][name]
+            slot['ApplyCpuLimits'] = slot['ApplyCpuBoost'] = False
+            slot['CpuBoost'] = slot['CpuBoostMode'] = None
         for code, policy in power.items():
             name = CODE_TO_NAME.get(str(code))
             if not name or not isinstance(policy, dict):
                 continue
             slot = self.store.data['Tuning'][name]
-            slot['ApplyCpuLimits'] = True
+            slot['ApplyCpuLimits'] = 'pl1' in policy and 'pl2' in policy
+            slot['ApplyCpuBoost'] = 'boost' in policy
             if 'pl1' in policy:
                 slot['CpuPl1Watts'] = policy.get('pl1')
             if 'pl2' in policy:

@@ -138,15 +138,18 @@ class Hardware:
                 self.close_lighting()
                 if attempt or exc.errno not in (errno.ENODEV,errno.ENXIO,errno.EIO,errno.EBADF):raise
 
-    def lighting(self, colors, brightness=100, effect='Static', speed=5):
+    def lighting(self, colors, brightness=100, effect='Static', speed=5, direction=1):
         if len(colors) != 4 or any(len(c) != 3 or any(not 0 <= v <= 255 for v in c) for c in colors):
             raise ValueError('Four RGB colors are required')
         if not 0 <= brightness <= 100 or effect not in EFFECTS or not 0 <= speed <= 10:
             raise ValueError('Invalid lighting parameters')
+        if direction not in (0, 1, 2, 3):
+            raise ValueError('Invalid lighting direction')
+        native_direction = (2, 1, 3, 4)[direction] if effect == 'Wave' else 1
         packets=[]
         for i,color in enumerate(colors if effect=='Static' else colors[:1]):
             if effect!='Static':color=tuple(round(v*brightness/100) for v in color)
-            packets.append(bytes([0xA4,0x21,2 if brightness==0 else EFFECTS[effect],brightness,0 if effect=='Static' or brightness==0 else max(1,speed),0 if effect=='Static' or brightness==0 else 1,*(color if brightness else (0,0,0)),(1<<i) if effect=='Static' else 15,0]))
+            packets.append(bytes([0xA4,0x21,2 if brightness==0 else EFFECTS[effect],brightness,0 if effect=='Static' or brightness==0 else max(1,speed),0 if effect=='Static' or brightness==0 else native_direction,*(color if brightness else (0,0,0)),(1<<i) if effect=='Static' else 15,0]))
         self._lighting_packets(packets)
 
     def logo_lighting(self,color,brightness=100,effect='Static',speed=5):

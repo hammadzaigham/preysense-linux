@@ -8,21 +8,27 @@ MODES = {'Quiet': 0, 'Balanced': 1, 'Performance': 4, 'Turbo': 5, 'Eco': 6}
 def fan_policy(policy):
     if not isinstance(policy, dict) or policy.get('kind') not in ('Auto', 'Max', 'Custom'):
         raise ValueError('Invalid fan policy')
-    if policy['kind'] != 'Custom':
+    if policy['kind'] != 'Custom' and 'stages' not in policy:
         return dict(kind=policy['kind'])
-    delay = policy.get('delay', 2)
+    delay = policy.get('delay', 0)
     if 'stages' not in policy:
         raise ValueError('Custom fan policy requires stages')
     stages = normalize_stages(policy['stages'])
     FanCurve(stages=stages, delay=delay)
-    return dict(kind='Custom', delay=int(delay), stages=compact_stages(stages))
+    return dict(kind=policy['kind'], delay=int(delay), stages=compact_stages(stages))
 
 
 def power_policy(policy):
-    if not isinstance(policy, dict) or not {'pl1', 'pl2'} <= set(policy) or bool(set(policy) - {'pl1', 'pl2', 'tau', 'boost'}):
+    if not isinstance(policy, dict):
         raise ValueError('Invalid CPU power policy')
-    if any(type(policy[k]) is not int for k in ('pl1', 'pl2')) or not 5 <= policy['pl1'] <= policy['pl2']:
-        raise ValueError('CPU limits require 5 ≤ PL1 ≤ PL2')
+    fields = set(policy)
+    limits = {'pl1', 'pl2'}
+    if fields - (limits | {'tau', 'boost'}) or (fields != {'boost'} and not limits <= fields):
+        raise ValueError('Invalid CPU power policy')
+    if limits <= fields:
+        pl1, pl2 = policy['pl1'], policy['pl2']
+        if type(pl1) is not int or type(pl2) is not int or not 5 <= pl1 <= pl2:
+            raise ValueError('CPU limits require 5 ≤ PL1 ≤ PL2')
     if 'tau' in policy and (type(policy['tau']) is not int or policy['tau'] not in (0, 1, 2, 4, 8, 16, 32, 56, 64, 128, 256, 449)):
         raise ValueError('Unsupported Tau step')
     if 'boost' in policy and type(policy['boost']) is not bool:

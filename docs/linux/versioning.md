@@ -1,6 +1,6 @@
-# Application version1.0.0
+# Application version 1.1.0
 
-The Linux application release is **1.0.0**, defined once in
+The Linux application release is **1.1.0**, defined once in
 `linux/version.py` as `__version__`. The dashboard subtitle and `preysense --version`
 should both read this constant. `linux/install.sh` already copies all top-level
 Python modules, including this file.

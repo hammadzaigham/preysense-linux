@@ -3,7 +3,7 @@
 PreySense uses the `preysense` kernel module for Acer controls. When Secure Boot
 validation is enabled, that module must be signed with a key trusted by your
 kernel. This guide keeps validation enabled and uses DKMS to sign rebuilds.
-The app version is 1.0.0; the internal driver/DKMS version is 2.5.0.
+The app version is 1.1.0; the internal driver/DKMS version is 2.5.0.
 
 These steps are for Fedora booted through its normal shim bootloader. They do
 not sign NVIDIA drivers and do not sign the RPM package. If Secure Boot is off,

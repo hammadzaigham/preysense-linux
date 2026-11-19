@@ -71,7 +71,7 @@ class RectangularSwitch(QAbstractButton):
         # Left half = off, Right half = on
         target = event.position().x() > (self.width() / 2.0)
         self.setChecked(target if self.isChecked() != target else not target)
-        self.clicked.emit(self.isChecked())
+        self.clicked[bool].emit(self.isChecked())
 
 
 class SettingSwitchRow(QWidget):

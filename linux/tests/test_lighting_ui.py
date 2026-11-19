@@ -5,14 +5,16 @@ os.environ.setdefault('QT_QPA_PLATFORM','offscreen')
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 from PySide6.QtCore import Qt,Signal,QSettings
 from PySide6.QtGui import QColor
-from PySide6.QtWidgets import QApplication,QWidget,QDialog,QSlider,QComboBox,QPushButton,QLabel,QCheckBox
+from PySide6.QtWidgets import QApplication,QWidget,QDialog,QSlider,QComboBox,QPushButton,QLabel,QCheckBox,QLineEdit
 from PySide6.QtTest import QTest
-from lighting_ui import build_lighting_window,ZONE_PRESETS,LOGO_PRESETS
+from lighting_ui import build_lighting_window,build_lighting_settings_window,ZONE_PRESETS,LOGO_PRESETS
 from preysense import Window
 class Worker(QWidget):lighting_frame=Signal(list)
 class Owner(QWidget):
     def __init__(self):
         super().__init__();self.temp=tempfile.TemporaryDirectory();self.settings=QSettings(str(Path(self.temp.name)/'prefs.ini'),QSettings.IniFormat)
+        self.settings.setValue('sync_zones', True)
+        self.settings.setValue('mode_key_sync', True)
         self.dialogs={'Lighting':QDialog(self)};self.worker=Worker();self.commands=[]
         self.colors=[QColor('#28d8ca') for _ in range(4)];self.color_buttons=[QPushButton() for _ in range(4)]
         self.brightness=QSlider(Qt.Horizontal);self.brightness.setRange(0,100);self.brightness.setValue(80)
@@ -47,7 +49,7 @@ class LightingUiTests(unittest.TestCase):
         self.assertEqual(len(self.dialog.findChildren(WindowTitleBar)),1)
         self.assertEqual(self.dialog.header.height(),30)
         self.assertEqual((self.ui['wheel'].width(),self.ui['wheel'].height()),(140,140))
-        self.assertEqual(self.ui['mode'].width(),154)
+        self.assertEqual(self.ui['mode'].width(),210)
         self.assertEqual(self.ui['preset'].width(),210)
         self.assertEqual((self.ui['hex'].width(),self.ui['hex'].height()),(80,26))
         self.assertEqual(self.owner.commands,[])
@@ -70,15 +72,17 @@ class LightingUiTests(unittest.TestCase):
         self.ui['hex'].setText('#123456');self.ui['hex'].editingFinished.emit();self.settle()
         self.assertEqual(self.owner.commands[-1][1]['colors'],[(18,52,86)]*4)
         self.ui['sync'].setChecked(False);self.settle();self.assertEqual(len(self.owner.commands),3)
-    def test_logo_preset_power_and_sync_use_real_api(self):
+    def test_logo_preset_brightness_and_sync_use_real_api(self):
         self.ui['select_target']('Logo');combo=self.ui['logo_preset'];combo.setCurrentIndex(combo.findData('Fire'));self.settle()
         self.assertEqual(self.owner.commands[-1][0],'logo_lighting')
         self.assertEqual(self.owner.commands[-1][1]['color'],(255,0,51))
         self.ui['sync_logo'].setChecked(True);self.settle()
         self.assertEqual(self.owner.commands[-1][0],'lighting');self.assertTrue(self.owner.commands[-1][1]['sync_logo'])
         self.assertTrue(self.ui['sync_logo'].isChecked());self.assertFalse(self.owner.brightness.isEnabled())
-        self.ui['logo_power'].setChecked(False);self.settle()
-        self.assertEqual(self.owner.commands[-1][1]['effect'],'Off');self.assertFalse(self.ui['sync_logo'].isChecked())
+        self.ui['sync_logo'].setChecked(False)
+        self.owner.brightness.setValue(0);self.settle()
+        self.assertEqual(self.owner.commands[-1][1]['brightness'],0)
+        self.assertFalse(any(label.text() == 'Logo Backlight' for label in self.dialog.findChildren(QLabel)))
     def test_invalid_hex_never_applies_and_navigation_flushes_correct_target(self):
         before=[c.name() for c in self.owner.colors];self.ui['hex'].setText('invalid');self.ui['hex'].editingFinished.emit();self.settle()
         self.assertEqual([c.name() for c in self.owner.colors],before);self.assertEqual(self.owner.commands,[])
@@ -123,4 +127,43 @@ class LightingUiTests(unittest.TestCase):
         self.assertEqual(cmd, 'mode_key_lighting')
         self.assertEqual(args['color'], (255, 85, 0))
         self.assertEqual(args['effect'], 'Static')
+
+    def test_mode_window_uses_shared_brightness_settings(self):
+        self.ui['mode'].setCurrentText('Mode')
+        self.settle()
+        self.assertFalse(self.owner.brightness.isVisible())
+        self.assertEqual(self.owner.commands[-1][1]['effect'], 'Mode')
+        self.ui['select_target']('Logo')
+        self.ui['logo_mode'].setCurrentText('Mode')
+        self.settle()
+        self.assertFalse(self.owner.brightness.isVisible())
+        self.assertEqual(self.owner.commands[-1][1]['effect'], 'Mode')
+
+    def test_lighting_settings_edit_different_mode_without_repainting(self):
+        self.owner._confirmed_profile = 0
+        settings = build_lighting_settings_window(self.owner)
+        settings.show()
+        brightness = settings.findChild(QSlider)
+        editor = settings.findChild(QLineEdit)
+        self.assertEqual(editor.text(), '#A0FF90')
+        next(item for item in settings.findChildren(QPushButton) if item.text() == 'Turbo').click()
+        editor.setText('#123456')
+        editor.editingFinished.emit()
+        self.settle()
+        self.assertEqual(self.owner.settings.value('mode_lighting_colors'), {'05': '#123456'})
+        self.assertEqual(self.owner.commands, [])
+        brightness.setValue(73)
+        self.settle()
+        self.assertEqual(self.owner.commands, [('mode_lighting_palette', None)])
+        self.assertEqual(self.owner.settings.value('mode_lighting_brightness'), 73)
+        settings.close()
+
+    def test_fn_brightness_targets_keyboard_even_with_logo_editor_open(self):
+        self.ui['select_target']('Logo')
+        Window.step_lighting_brightness(self.owner, -1)
+        self.assertEqual(self.owner.brightness.value(), 60)
+        self.assertEqual(self.owner.commands[-1][0], 'keyboard_brightness')
+        self.assertEqual(self.owner.commands[-1][1]['brightness'], 75)
+        self.ui['select_target']('Keyboard')
+        self.assertEqual(self.owner.brightness.value(), 75)
 if __name__=='__main__':unittest.main()

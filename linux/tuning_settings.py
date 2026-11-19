@@ -1,15 +1,4 @@
-"""Tuning Settings Dialog for PreySense Linux.
-
-Matches PreySense.Frontend/Views/TuningSettingsWindow.xaml (460px):
-- Master Switches:
-  - Enable CPU Boost Tuning
-  - Enable CPU Power Limit Control
-  - Enable GPU Power Limit Control
-  - Enable GPU Overclocking
-- PROCHOT Section:
-  - CPU PROCHOT Offset value row
-  - Apply switch
-"""
+"""Windows-style master tuning controls and staged global PROCHOT settings."""
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QWidget, QFrame
@@ -57,125 +46,94 @@ def _separator(layout):
 
 
 def build_tuning_settings_dialog(window):
-    dialog, layout = _make_frameless_dialog(window, "Tuning Settings", width=460)
+    from cpu_prochot import CpuProchot
+    from design import action
 
-    # Master Toggles
-    sw_boost = SettingSwitchRow(
-        "Enable CPU Boost Tuning",
-        checked=bool(window.settings.value("enable_cpu_boost_tuning", True, type=bool))
-    )
-    sw_cpu = SettingSwitchRow(
-        "Enable CPU Power Limit Control",
-        checked=bool(window.settings.value("enable_cpu_power_limits", False, type=bool))
-    )
-    sw_gpu = SettingSwitchRow(
-        "Enable GPU Power Limit Control",
-        checked=bool(window.settings.value("enable_gpu_power_limits", False, type=bool))
-    )
-    sw_gpu_oc = SettingSwitchRow(
-        "Enable GPU Overclocking",
-        checked=bool(window.settings.value("enable_gpu_overclocking", False, type=bool))
+    dialog, layout = _make_frameless_dialog(window, 'Tuning Settings')
+    switches = (
+        ('Enable CPU Power Limit Control', 'enable_cpu_power_limits', True),
+        ('Enable GPU Power Limit Control', 'enable_gpu_power_limits', True),
     )
 
-    def on_boost_toggled(checked):
-        window.settings.setValue("enable_cpu_boost_tuning", bool(checked))
-        if hasattr(window, 'refresh_tuning_master_switches'):
-            window.refresh_tuning_master_switches()
+    def update_master(key, value):
+        window.settings.setValue(key, value)
+        refresh = getattr(window, 'refresh_tuning_master_switches', None)
+        if refresh:
+            refresh()
 
-    def on_cpu_toggled(checked):
-        window.settings.setValue("enable_cpu_power_limits", bool(checked))
-        if hasattr(window, 'refresh_tuning_master_switches'):
-            window.refresh_tuning_master_switches()
-
-    def on_gpu_toggled(checked):
-        window.settings.setValue("enable_gpu_power_limits", bool(checked))
-        if hasattr(window, 'refresh_tuning_master_switches'):
-            window.refresh_tuning_master_switches()
-
-    def on_gpu_oc_toggled(checked):
-        window.settings.setValue("enable_gpu_overclocking", bool(checked))
-        if hasattr(window, 'refresh_tuning_master_switches'):
-            window.refresh_tuning_master_switches()
-
-    sw_boost.toggled.connect(on_boost_toggled)
-    sw_cpu.toggled.connect(on_cpu_toggled)
-    sw_gpu.toggled.connect(on_gpu_toggled)
-    sw_gpu_oc.toggled.connect(on_gpu_oc_toggled)
-
-    layout.addWidget(sw_boost)
-    layout.addWidget(sw_cpu)
-    layout.addWidget(sw_gpu)
-    layout.addWidget(sw_gpu_oc)
+    for label, key, default in switches:
+        switch = SettingSwitchRow(label, checked=window.settings.value(key, default, type=bool))
+        if key == 'enable_gpu_power_limits':
+            switch.setEnabled(getattr(window, 'gpu_offsets_available', False))
+        switch.toggled.connect(lambda value, key=key: update_master(key, value))
+        layout.addWidget(switch)
 
     _separator(layout)
+    readout = QHBoxLayout()
+    activation = QLabel('PROCHOT —')
+    tjmax = QLabel('Tj-Max —')
+    readout.addWidget(activation)
+    readout.addStretch()
+    readout.addWidget(tjmax)
+    layout.addLayout(readout)
 
-    # PROCHOT Section
-    prochot_block = QWidget()
-    prochot_l = QVBoxLayout(prochot_block)
-    prochot_l.setContentsMargins(0, 0, 0, 0)
-    prochot_l.setSpacing(4)
+    fields = QHBoxLayout()
+    fields.setSpacing(12)
+    offset = SettingValueRow('CPU PROCHOT Offset', 0, '°C', 0, 63)
+    include = RectangularSwitch()
+    include.setAccessibleName('Include PROCHOT offset')
+    fields.addWidget(offset, 1)
+    fields.addWidget(include)
+    layout.addLayout(fields)
+    status = QLabel()
+    status.setWordWrap(True)
+    status.hide()
+    layout.addWidget(status)
+    save = action('Save')
+    layout.addWidget(save)
 
-    prochot_labels = QHBoxLayout()
-    prochot_act = QLabel('PROCHOT —')
-    tjmax_lab = QLabel('Tj-Max —')
-    for lab in (prochot_act, tjmax_lab):
-        lab.setObjectName('muted')
-    prochot_labels.addWidget(prochot_act)
-    prochot_labels.addStretch()
-    prochot_labels.addWidget(tjmax_lab)
-    prochot_l.addLayout(prochot_labels)
+    snapshot = None
 
-    prochot_row = QHBoxLayout()
-    prochot_offset = SettingValueRow('CPU PROCHOT Offset', 0, '°C', 0, 63)
-    prochot_switch = RectangularSwitch()
+    def refresh_readout():
+        activation.setText('PROCHOT —')
+        tjmax.setText('Tj-Max —')
+        if snapshot is not None:
+            suffix = ' - Locked' if snapshot.locked else ''
+            activation.setText(f'PROCHOT {snapshot.tjmax_celsius - offset.value()}°C{suffix}')
+            tjmax.setText(f'Tj-Max {snapshot.tjmax_celsius}°C')
+        offset.setEnabled(include.isEnabled() and include.isChecked())
 
-    saved_prochot = window.settings.value('prochot_offset', None)
-    if saved_prochot is not None:
-        try:
-            prochot_offset.setValue(int(saved_prochot))
-        except (TypeError, ValueError):
-            pass
-    prochot_switch.setChecked(bool(window.settings.value('apply_prochot', False, type=bool)))
+    def show(event):
+        nonlocal snapshot
+        snapshot = CpuProchot().read()
+        if snapshot is not None and window.settings.value('factory_prochot_offset', None) is None:
+            window.settings.setValue('factory_prochot_offset', snapshot.offset_celsius)
+            window.settings.setValue('factory_tjmax', snapshot.tjmax_celsius)
+            window.settings.setValue('factory_prochot_locked', snapshot.locked)
+        fallback = snapshot.offset_celsius if snapshot is not None else 0
+        offset.setValue(window.settings.value('prochot_offset', fallback, type=int))
+        include.setEnabled(snapshot is not None and not snapshot.locked)
+        include.setChecked(include.isEnabled() and window.settings.value('apply_prochot', False, type=bool))
+        refresh_readout()
+        status.hide()
+        QDialog.showEvent(dialog, event)
 
-    def on_prochot_changed(val):
-        window.settings.setValue('prochot_offset', int(val))
-        if hasattr(window, 'prochot_offset'):
-            window.prochot_offset.setValue(int(val))
+    def save_settings():
+        if include.isEnabled():
+            try:
+                offset.spin.interpretText()
+                window.settings.setValue('prochot_offset', offset.value())
+                window.settings.setValue('apply_prochot', include.isChecked())
+            except (OSError, ValueError) as exc:
+                status.setText(f'Could not save PROCHOT: {exc}')
+                status.show()
+                dialog.adjustSize()
+                return
+        dialog.close()
 
-    def on_prochot_switch(checked):
-        window.settings.setValue('apply_prochot', bool(checked))
-        if hasattr(window, 'prochot_switch'):
-            window.prochot_switch.blockSignals(True)
-            window.prochot_switch.setChecked(bool(checked))
-            window.prochot_switch.blockSignals(False)
-
-    prochot_offset.valueChanged.connect(on_prochot_changed)
-    prochot_switch.toggled.connect(on_prochot_switch)
-
-    prochot_row.addWidget(prochot_offset, 1)
-    prochot_row.addWidget(prochot_switch)
-    prochot_l.addLayout(prochot_row)
-    layout.addWidget(prochot_block)
-
-    def refresh_prochot_readouts():
-        tjmax = window.settings.value('factory_tjmax', None)
-        offset = window.settings.value('prochot_offset', None)
-        if tjmax is not None:
-            tjmax_lab.setText(f'Tj-Max {tjmax}°C')
-            if offset is not None:
-                try:
-                    activation = int(tjmax) - int(offset)
-                    prochot_act.setText(f'PROCHOT {activation}°C')
-                except (TypeError, ValueError):
-                    prochot_act.setText('PROCHOT —')
-            else:
-                prochot_act.setText('PROCHOT —')
-        else:
-            tjmax_lab.setText('Tj-Max —')
-            prochot_act.setText('PROCHOT —')
-
-    dialog.refresh_prochot_readouts = refresh_prochot_readouts
-    refresh_prochot_readouts()
-
+    include.toggled.connect(refresh_readout)
+    offset.valueChanged.connect(refresh_readout)
+    save.clicked.connect(save_settings)
+    dialog.showEvent = show
     dialog.adjustSize()
     return dialog

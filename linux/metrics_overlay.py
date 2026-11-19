@@ -6,7 +6,7 @@ from PySide6.QtCore import Qt, QPoint, QPointF, QRect, QRectF, Signal, QTimer, Q
 from PySide6.QtGui import QPainter, QColor, QFont, QPen, QBrush, QPainterPath, QFontMetricsF, QCursor
 from PySide6.QtWidgets import (
     QWidget, QApplication, QLabel, QVBoxLayout, QHBoxLayout,
-    QComboBox, QDialog, QPushButton, QSlider, QFrame
+    QComboBox, QDialog, QPushButton, QSlider, QFrame, QScrollArea
 )
 from ui_controls import RectangularSwitch, SettingSwitchRow, SettingSliderRow, SettingDropdownRow
 
@@ -23,10 +23,6 @@ BASE_INNER_PAD_Y = 0
 BASE_SECTION_GAP = 1
 
 # Color tokens matching PreySense.Overlay
-OVERLAY_TOP_GLOW = QColor(255, 255, 255, 8)
-OVERLAY_BOTTOM_GLOW = QColor(0, 0, 0, 20)
-OVERLAY_BORDER_COLOR = QColor(255, 255, 255, 14)
-OVERLAY_SEP_COLOR = QColor(255, 255, 255, 18)
 CPU_GRAPH_COLOR = QColor(44, 124, 180)
 GPU_GRAPH_COLOR = QColor(58, 170, 84)
 
@@ -53,7 +49,7 @@ def first_available(*values):
 
 
 # Windows-aligned choices minus FPS and GPU metrics that stay N/A without NVAPI.
-CPU_CHOICES = ("None", "Usage", "Temperature", "Active Clock", "Effective Clock", "Voltage", "Power", "Memory", "Memory Speed", "Fan Speed")
+CPU_CHOICES = ("None", "Usage", "Temperature", "Active Clock", "Effective Clock", "Voltage", "Power", "Power Limit", "Memory", "Memory Speed", "Fan Speed")
 GPU_CHOICES = ("None", "Usage", "Temperature", "Clock", "Power", "Power Limit", "Memory", "Memory Speed", "Fan Speed")
 DEFAULT_COLUMNS = (
     ("Usage", "Usage"),
@@ -93,7 +89,7 @@ def metric_value(data, metric, gpu=False):
         "Usage": "usage" if gpu else "cpu_usage",
         "Temperature": "temperature" if gpu else "cpu_temp",
         "Power": "power" if gpu else "cpu_power_w",
-        "Power Limit": "enforced_power_limit_w",
+        "Power Limit": "enforced_power_limit_w" if gpu else "cpu_pl1_w",
         "Clock": "clock",
         "Active Clock": "cpu_p_core_mhz",
         "Effective Clock": "cpu_p_core_mhz",
@@ -172,6 +168,7 @@ class HardwareOverlay(QWidget):
         self.data = {}
         self.scale_percent = int(settings.value("hud_scale", 100))
         self.bg_alpha = int(settings.value("hud_background", 50))
+        self.overlay_theme = settings.value("overlay_theme", "Dark")
         self.text_alpha = int(settings.value("hud_text", 100))
         self.h_pos = settings.value("hud_h_pos", "Left")
         self.v_pos = settings.value("hud_v_pos", "Top")
@@ -183,9 +180,7 @@ class HardwareOverlay(QWidget):
         self.metric_history = {}
         slot_count = int(settings.value("overlay_slot_count", len(DEFAULT_COLUMNS)))
         slot_count = max(0, min(MAX_OVERLAY_SLOTS, slot_count))
-        if slot_count == 0 and settings.contains("overlay_col_1"):
-            slot_count = len(DEFAULT_COLUMNS)
-        for i in range(slot_count or len(DEFAULT_COLUMNS)):
+        for i in range(slot_count):
             default = DEFAULT_COLUMNS[i] if i < len(DEFAULT_COLUMNS) else ("None", "None")
             stored = str(settings.value(f"overlay_col_{i+1}", "|".join(default))).split("|")
             if len(stored) != 2:
@@ -244,7 +239,8 @@ class HardwareOverlay(QWidget):
         self.update()
 
     def _measure_layout(self, sc):
-        font=QFont("DejaVu Sans")
+        font=QFont()
+        font.setFamilies(["Bahnschrift", "DejaVu Sans"])
         font.setPixelSize(max(5, round(BASE_FONT_SIZE*sc)))
         font.setWeight(QFont.DemiBold)
         font.setStretch(85)
@@ -378,9 +374,6 @@ class HardwareOverlay(QWidget):
         for i, pair in enumerate(self.columns):
             self.settings.setValue(f"overlay_col_{i+1}", f"{pair[0]}|{pair[1]}")
             self.settings.setValue(f"overlay_col_{i+1}_graph", self.column_graphs[i])
-        for i in range(len(self.columns), MAX_OVERLAY_SLOTS):
-            self.settings.remove(f"overlay_col_{i+1}")
-            self.settings.remove(f"overlay_col_{i+1}_graph")
         self.settings.setValue("overlay_slot_count", len(self.columns))
         self.sync_graph_metrics()
         self.recalculate_size()
@@ -477,11 +470,6 @@ class HardwareOverlay(QWidget):
             valid.append(usable)
         self.update()
 
-    def background_color(self, color):
-        result = QColor(color)
-        result.setAlpha(round(result.alpha() * self.bg_alpha / 100))
-        return result
-
     def paintEvent(self, event):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
@@ -491,34 +479,30 @@ class HardwareOverlay(QWidget):
         sc = layout["scale"]
         w, h = self.width(), self.height()
 
-        # 1. Background fill and rounded shell matching Windows
-        alpha = int(255 * (self.bg_alpha / 100.0))
-        radius = float(self.corner_radius) * (sc / 2.0)
-        rect = QRectF(0.5, 0.5, w - 1.0, h - 1.0)
-        path = QPainterPath()
-        path.addRoundedRect(rect, radius, radius)
-        p.fillPath(path, QColor(0, 0, 0, alpha))
+        white_theme = self.overlay_theme == "White"
+        background = QColor("#F5F5F7" if white_theme else "#000000")
+        background.setAlpha(round(255 * self.bg_alpha / 100))
+        radius = min(self.corner_radius * sc, w / 2, h / 2)
+        shell = QPainterPath()
+        shell.addRoundedRect(QRectF(0, 0, w, h), radius, radius)
+        p.fillPath(shell, background)
+        p.setClipPath(shell)
+        text_color = QColor("#17191C" if white_theme else "#F5F5F7")
+        text_color.setAlpha(round(255 * self.text_alpha / 100))
+        gpu_graph = QColor("#218739") if white_theme else GPU_GRAPH_COLOR
 
-        # 2. Glowing Borders matching HardwareOverlay.cs clipped to rounded path
-        p.save()
-        p.setClipPath(path)
-        p.fillRect(0, 0, w, int(1 * sc), self.background_color(OVERLAY_TOP_GLOW))
-        p.fillRect(0, h - int(1 * sc), w, int(1 * sc), self.background_color(OVERLAY_BOTTOM_GLOW))
-        p.restore()
-        p.setPen(QPen(self.background_color(OVERLAY_BORDER_COLOR), 1))
-        p.setBrush(Qt.NoBrush)
-        p.drawPath(path)
-
-        # Typography
-        text_a = int(255 * (self.text_alpha / 100.0))
         font_main = layout['font']
         pad_x=layout['pad_x'];pad_y=layout['pad']
         line_h=layout['line']
         cur_x=pad_x
 
         # Windows column order and widths from HardwareOverlay.Layout.cs.
-        p.setPen(QColor(255, 255, 255, text_a))
+        p.setPen(text_color)
         p.setFont(font_main)
+        unit_font = QFont(font_main)
+        unit_font.setPixelSize(max(4, round((BASE_FONT_SIZE - 1) * sc)))
+        rpm_font = QFont(unit_font)
+        rpm_font.setPixelSize(max(4, round(BASE_RPM_FONT_SIZE * sc)))
         top = pad_y + layout["inset"]
         label_w = layout["label"]
         for row, label in enumerate(("CPU", "GPU")):
@@ -527,9 +511,22 @@ class HardwareOverlay(QWidget):
         for i, pair in enumerate(self.columns):
             width = layout["columns"][i][0]
             if not width: continue
-            p.setPen(QColor(255, 255, 255, text_a))
+            p.setPen(text_color)
             for row, metric in enumerate(pair):
-                p.drawText(QRectF(cur_x, top + row*(line_h + layout["gap"]), width, line_h), Qt.AlignRight | Qt.AlignVCenter, column_text(self.data, metric, bool(row)))
+                y = top + row * (line_h + layout["gap"])
+                text = column_text(self.data, metric, bool(row))
+                unit = next((suffix for suffix in ("MHz", "RPM", "°C", "GB", "%", "W", "V")
+                             if text.endswith(suffix)), "")
+                if unit:
+                    small_font = rpm_font if unit == "RPM" else unit_font
+                    unit_width = QFontMetricsF(small_font).horizontalAdvance(unit)
+                    p.setFont(small_font)
+                    p.drawText(QRectF(cur_x, y, width, line_h), Qt.AlignRight | Qt.AlignVCenter, unit)
+                    p.setFont(font_main)
+                    p.drawText(QRectF(cur_x, y, width - unit_width - 1, line_h),
+                               Qt.AlignRight | Qt.AlignVCenter, text[:-len(unit)])
+                else:
+                    p.drawText(QRectF(cur_x, y, width, line_h), Qt.AlignRight | Qt.AlignVCenter, text)
             cur_x += width
             if self.column_graphs[i]:
                 gx = cur_x + int(6*sc)
@@ -539,13 +536,11 @@ class HardwareOverlay(QWidget):
                 histories = [self.metric_history.get((bool(row), metric), [0.0]*60) for row, metric in enumerate(pair)]
                 peak = max([10.0] + [v for history,metric in zip(histories,pair) if metric != "None" for v in history])
                 p.save();p.setClipRect(QRectF(gx,gy,gw,gh))
-                for row,color,fill_alpha in ((1,GPU_GRAPH_COLOR,34),(0,CPU_GRAPH_COLOR,24)):
+                for row,color,fill_alpha in ((1,gpu_graph,34),(0,CPU_GRAPH_COLOR,24)):
                     if pair[row] != "None":
                         scaled = [v/peak*100 for v in histories[row]]
                         self.draw_mini_graph(p,gx,gy,gw,gh,scaled,color,fill_alpha=fill_alpha)
                 p.restore()
-                axis=QColor(60,60,60,round(255*self.text_alpha/100))
-                p.setPen(QPen(axis,sc*.5));p.drawLine(QPointF(gx,gy+gh),QPointF(gx+gw,gy+gh))
                 cur_x += layout["columns"][i][1]
 
     def draw_mini_graph(self, p, x, y, w, h, history, color, valid=None, fill_alpha=24):
@@ -601,6 +596,8 @@ class HardwareOverlay(QWidget):
 def _metric_label(metric, gpu=False):
     if metric == "None":
         return "None"
+    if metric == "Power Limit" and not gpu:
+        return "CPU Power Limit (PL1)"
     labels = {
         "Fan Speed": "Fan",
         "Active Clock": "Active Clock",
@@ -621,11 +618,25 @@ def controls(owner, layout):
         from window_chrome import WindowTitleBar
         layout.setContentsMargins(0,0,0,0);layout.setSpacing(0)
         layout.addWidget(WindowTitleBar(dialog,'Overlay'))
-        content=QWidget(dialog)
-        root=layout
+        content = QWidget()
+
+        class OverlayEditorScroll(QScrollArea):
+            def sizeHint(self):
+                size = super().sizeHint()
+                size.setHeight(min(self.maximumHeight(), content.sizeHint().height()))
+                return size
+
+        screen = dialog.screen() or QApplication.primaryScreen()
+        max_height = screen.availableGeometry().height() - 64 if screen else 600
+        scroll = OverlayEditorScroll()
+        scroll.setMaximumHeight(max(160, max_height))
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setWidgetResizable(True)
+        scroll.setWidget(content)
+        layout.addWidget(scroll)
         layout=QVBoxLayout(content)
         layout.setContentsMargins(14,10,14,8);layout.setSpacing(0)
-        root.addWidget(content)
     owner.overlay.owner=owner
     owner.overlay.recalculate_size();owner.overlay.reposition()
     # 1. Enable Metrics Overlay (Rectangular Switch)
@@ -639,6 +650,18 @@ def controls(owner, layout):
 
     # Separator
     layout.addSpacing(4);sep1 = OverlaySeparator();layout.addWidget(sep1);layout.addSpacing(8)
+
+    theme_row = SettingDropdownRow("Theme", dropdown_width=140)
+    theme_row.addItems(["Dark", "White"])
+    theme_row.setCurrentText(owner.overlay.overlay_theme)
+
+    def set_overlay_theme(theme):
+        owner.overlay.overlay_theme = theme
+        owner.overlay.settings.setValue("overlay_theme", theme)
+        owner.overlay.update()
+
+    theme_row.currentTextChanged.connect(set_overlay_theme)
+    layout.addWidget(theme_row)
 
     # 2. Sliders matching MetricsWindow.xaml
     slider_scale = SettingSliderRow("HUD Scale", 50, 200, owner.overlay.scale_percent, unit="%")
@@ -660,13 +683,13 @@ def controls(owner, layout):
     layout.addSpacing(4);sep2 = OverlaySeparator();layout.addWidget(sep2);layout.addSpacing(8)
 
     # 3. Position Dropdowns (Horizontal Position & Vertical Position)
-    row_hpos = SettingDropdownRow("Horizontal Position", dropdown_width=110)
+    row_hpos = SettingDropdownRow("Horizontal Position", dropdown_width=180)
     row_hpos.addItems(["Left", "Center", "Right"])
     row_hpos.setCurrentText(owner.overlay.h_pos)
     row_hpos.currentTextChanged.connect(lambda v: owner.overlay.configure("h_pos", v))
     layout.addWidget(row_hpos)
 
-    row_vpos = SettingDropdownRow("Vertical Position", dropdown_width=110)
+    row_vpos = SettingDropdownRow("Vertical Position", dropdown_width=180)
     row_vpos.addItems(["Top", "Center", "Bottom"])
     row_vpos.setCurrentText(owner.overlay.v_pos)
     row_vpos.currentTextChanged.connect(lambda v: owner.overlay.configure("v_pos", v))
@@ -677,17 +700,16 @@ def controls(owner, layout):
 
     header = QWidget(); header_box = QHBoxLayout(header)
     header_box.setContentsMargins(0, 2, 0, 6); header_box.setSpacing(4)
-    header_box.addWidget(QLabel("Overlay Metric Slots")); header_box.addStretch()
-    add_btn = QPushButton("+ Add Slot"); add_btn.setFixedSize(88, 26)
+    slots_title = QLabel("Overlay Metric Slots")
+    slots_title.setProperty('settingLabel', True)
+    header_box.addWidget(slots_title)
+    header_box.addStretch()
+    add_btn = QPushButton("Add Slot"); add_btn.setFixedSize(88, 26)
     header_box.addWidget(add_btn)
     layout.addWidget(header)
     slots_host = QWidget(); slots_layout = QVBoxLayout(slots_host)
     slots_layout.setContentsMargins(0, 0, 0, 0); slots_layout.setSpacing(0)
     layout.addWidget(slots_host)
-    empty = QLabel("No overlay slots configured. Click '+ Add Slot' to add metrics.")
-    empty.setStyleSheet("font-style: italic; color: #888;")
-    slots_layout.addWidget(empty)
-
     def rebuild_slots():
         while slots_layout.count():
             item = slots_layout.takeAt(0)
@@ -696,7 +718,7 @@ def controls(owner, layout):
                 widget.deleteLater()
         owner.overlay_slots = []
         if not owner.overlay.columns:
-            note = QLabel("No overlay slots configured. Click '+ Add Slot' to add metrics.")
+            note = QLabel("No overlay slots configured. Click 'Add Slot' to add metrics.")
             note.setStyleSheet("font-style: italic; color: #888;")
             slots_layout.addWidget(note)
             dialog.adjustSize() if isinstance(dialog, QDialog) else None
@@ -707,12 +729,12 @@ def controls(owner, layout):
             label = QLabel(f"Slot #{index+1}"); label.setFixedWidth(46); box.addWidget(label)
             combos = []
             for gpu, choices in ((False, CPU_CHOICES), (True, GPU_CHOICES)):
-                combo = QComboBox(); combo.setFixedSize(168, 28)
+                combo = QComboBox(); combo.setMinimumWidth(140); combo.setMaximumWidth(180); combo.setFixedHeight(28)
                 for metric in choices:
                     combo.addItem(_metric_label(metric, gpu), metric)
                 combo.setCurrentIndex(max(0, choices.index(pair[int(gpu)])))
-                box.addWidget(combo); combos.append(combo)
-            graph = RectangularSwitch(); graph.setChecked(owner.overlay.column_graphs[index])
+                box.addWidget(combo, 1); combos.append(combo)
+            graph = RectangularSwitch(); graph.setChecked(owner.overlay.column_graphs[index]); graph.setAccessibleName(f"Show graph for slot {index + 1}")
             box.addSpacing(4); box.addWidget(graph)
             remove = QPushButton("–"); remove.setFixedSize(28, 28); remove.setToolTip("Remove slot")
             box.addWidget(remove)

@@ -36,6 +36,16 @@ class ConfigStoreTests(unittest.TestCase):
         self.assertEqual(facade.value('theme'),'Light')
         fans=json.loads(facade.value('fan_policies'))
         self.assertEqual(fans['1']['kind'],'Max')
+
+    def test_auto_fan_profile_keeps_curve_and_explicit_zero_delay(self):
+        store = ConfigStore(self.path)
+        facade = JsonSettings(store)
+        stages = [{'CpuTempC': 127, 'GpuTempC': 127, 'CpuDutyPercent': 47, 'GpuDutyPercent': 29}]
+        policy = {'kind': 'Auto', 'delay': 0, 'stages': stages}
+        facade.setValue('fan_policies', json.dumps({'1': policy}))
+        reopened = JsonSettings(ConfigStore(self.path))
+        self.assertEqual(json.loads(reopened.value('fan_policies'))['1'], policy)
+
     def test_migrate_calibration_json(self):
         cal=Path(self.temp.name)/'calibration.json'
         cal.write_text(json.dumps({'Balanced':{'pl1':65,'pl2':140,'tau':56}}))
@@ -90,17 +100,17 @@ class ConfigStoreTests(unittest.TestCase):
         store = ConfigStore(self.path)
         facade = JsonSettings(store)
         self.assertTrue(facade.value('enable_cpu_boost_tuning', type=bool))
-        self.assertFalse(facade.value('enable_cpu_power_limits', type=bool))
-        self.assertFalse(facade.value('enable_gpu_power_limits', type=bool))
+        self.assertTrue(facade.value('enable_cpu_power_limits', type=bool))
+        self.assertTrue(facade.value('enable_gpu_power_limits', type=bool))
         self.assertFalse(facade.value('enable_gpu_overclocking', type=bool))
 
         facade.setValue('enable_gpu_overclocking', True)
-        facade.setValue('enable_cpu_power_limits', True)
+        facade.setValue('enable_cpu_power_limits', False)
         facade.setValue('gpu_clock_policies', json.dumps({'5': {'core': 120, 'mem': 250}}))
 
         again = JsonSettings(ConfigStore(self.path))
         self.assertTrue(again.value('enable_gpu_overclocking', type=bool))
-        self.assertTrue(again.value('enable_cpu_power_limits', type=bool))
+        self.assertFalse(again.value('enable_cpu_power_limits', type=bool))
         clocks = json.loads(again.value('gpu_clock_policies'))
         self.assertEqual(clocks['5']['core'], 120)
         self.assertEqual(clocks['5']['mem'], 250)
@@ -109,15 +119,26 @@ class ConfigStoreTests(unittest.TestCase):
         self.assertEqual(turbo['GpuCoreClockOffsetMhz'], 120)
         self.assertEqual(turbo['GpuMemoryClockOffsetMhz'], 250)
 
+    def test_factory_lighting_matches_windows(self):
+        settings = JsonSettings(ConfigStore(self.path))
+        self.assertEqual(settings.value('effect'), 'Mode')
+        self.assertEqual(settings.value('logo_effect'), 'Mode')
+        self.assertEqual(settings.value('logo_brightness'), 100)
+        self.assertEqual(settings.value('colors'), ['#00AEC7', '#00AEC7', '#00E5FF', '#00E5FF'])
+        self.assertEqual(settings.value('led_timeout'), 30)
+        self.assertFalse(settings.value('sync_zones', type=bool))
+        settings.setValue('sync_zones', True)
+        self.assertTrue(JsonSettings(ConfigStore(self.path)).value('sync_zones', type=bool))
+
     def test_mode_key_lighting_persistence(self):
         store = ConfigStore(self.path)
         facade = JsonSettings(store)
-        self.assertTrue(facade.value('mode_key_sync', type=bool))
+        self.assertFalse(facade.value('mode_key_sync', type=bool))
         self.assertEqual(facade.value('mode_key_effect'), 'Mode')
         self.assertEqual(facade.value('mode_key_color'), '#00AEC7')
         self.assertEqual(facade.value('mode_key_brightness'), 100)
 
-        facade.setValue('mode_key_sync', False)
+        facade.setValue('mode_key_sync', True)
         facade.setValue('mode_key_effect', 'Static')
         facade.setValue('mode_key_color', '#FF5500')
         facade.setValue('mode_key_brightness', 85)
@@ -125,7 +146,7 @@ class ConfigStoreTests(unittest.TestCase):
         facade.setValue('mode_key_colors', {'05': '#C700FF', '01': '#00FF00'})
 
         again = JsonSettings(ConfigStore(self.path))
-        self.assertFalse(again.value('mode_key_sync', type=bool))
+        self.assertTrue(again.value('mode_key_sync', type=bool))
         self.assertEqual(again.value('mode_key_effect'), 'Static')
         self.assertEqual(again.value('mode_key_color'), '#FF5500')
         self.assertEqual(again.value('mode_key_brightness'), 85)

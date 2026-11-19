@@ -31,6 +31,18 @@ class WorkerTests(unittest.TestCase):
         self.assertIsNone(self.w.curve)
         self.w.hardware.write.assert_called_once_with('fan_mode',0)
         self.w.hardware.fan_duty.assert_not_called()
+    def test_zero_boost_leaves_cooling_with_firmware(self):
+        self.w.curve=FanCurve()
+        self.w.poll()
+        self.w.hardware.write.assert_called_once_with('fan_mode',0)
+        self.w.hardware.fan_duty.assert_not_called()
+
+    def test_nonzero_boost_renews_kernel_watchdog_lease(self):
+        self.w.poll()
+        self.w.last_sensor_poll=float('-inf')
+        self.w.cached_data=None
+        self.w.poll()
+        self.assertEqual(self.w.hardware.fan_duty.call_count,2)
     def test_manual_write_failure_restores_automatic(self):
         self.w.hardware.fan_duty.side_effect=OSError('gone')
         self.w.poll()

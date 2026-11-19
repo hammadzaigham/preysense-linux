@@ -3,7 +3,7 @@ from pathlib import Path
 from unittest.mock import Mock,patch
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 from PySide6.QtCore import QCoreApplication
-from hotkeys import Hotkeys
+from hotkeys import Hotkeys, classify_report
 class HotkeyEventsTests(unittest.TestCase):
  @classmethod
  def setUpClass(cls):cls.app=QCoreApplication.instance() or QCoreApplication([])
@@ -32,4 +32,36 @@ class HotkeyEventsTests(unittest.TestCase):
   (self.native/'event_notifications').write_text('1')
   keys=Hotkeys(root=self.root)
   try:self.assertTrue(keys.timer.isActive());self.assertEqual(keys.event_fds,{})
+  finally:keys.stop()
+ def test_keyboard_brightness_counter_reports_signed_changes_without_startup_step(self):
+  counter = self.native/'keyboard_brightness_steps'
+  counter.write_text('-3')
+  keys = Hotkeys(root=self.root)
+  try:
+   changes = []
+   keys.keyboard_brightness.connect(changes.append)
+   keys.poll()
+   counter.write_text('-2')
+   keys.poll()
+   counter.write_text('-4')
+   keys.poll()
+   self.assertEqual(changes, [1, -2])
+  finally:keys.stop()
+ def test_acer_vendor_brightness_reports(self):
+  self.assertEqual(classify_report(bytes.fromhex('04 7c ff')), 'brightness_up')
+  self.assertEqual(classify_report(bytes.fromhex('04 7d ff')), 'brightness_down')
+  self.assertIsNone(classify_report(bytes.fromhex('04 7c 00')))
+  self.assertIsNone(classify_report(bytes.fromhex('a0 7d ff')))
+ def test_hid_brightness_deduplicates_repeats_and_standard_input(self):
+  keys = Hotkeys(root=self.root)
+  try:
+   changes = []
+   keys.keyboard_brightness.connect(changes.append)
+   with patch('hotkeys.time.monotonic', side_effect=[1, 1.01, 1.02, 1.03, 1.2]):
+    keys.dispatch_brightness(1, 'hid')
+    keys.dispatch_brightness(1, 'hid')
+    keys.dispatch_brightness(1, 'evdev')
+    keys.dispatch_brightness(-1, 'hid')
+    keys.dispatch_brightness(-1, 'evdev')
+   self.assertEqual(changes, [1, -1, -1])
   finally:keys.stop()
